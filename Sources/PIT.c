@@ -18,9 +18,7 @@
 #include "MK70F12.h"
 #include "LEDs.h"
 #include "OS.h"
-#include "accel.h"
 #include "packet.h"
-#include "median.h"
 
 static uint32_t PIT_ModuleClk;
 static void *PITArguments;
@@ -102,18 +100,7 @@ void PITThread(void* pData)
   for(;;)
   {
     OS_SemaphoreWait(PITSemaphore, 0);
-
-    /*!<Sets to 1 at the end of the timer period. Writing 1 to this flag clears it. Writing 0 has no effect. p 1344*/
-    if (CurrentMode == ACCEL_POLL) /*!< using RTC for ACCEL_POLL as the freq wanted is 1Hz and P = 1/Hz = 1 s*/
-    {
-      uint8_t data[3];
-      Accel_ReadXYZ(data);
-      data[0] = Median_Filter3(XYZstruct[0].axes.x, XYZstruct[1].axes.x, XYZstruct[2].axes.x);
-      data[1] = Median_Filter3(XYZstruct[0].axes.y, XYZstruct[1].axes.y, XYZstruct[2].axes.y);
-      data[2] = Median_Filter3(XYZstruct[0].axes.z, XYZstruct[1].axes.z, XYZstruct[2].axes.z);
-      Packet_Put(ACCEL_COMMAND, data[0], data[1], data[2]);
-      LEDs_Toggle(LED_GREEN);
-    }
+    LEDs_Toggle(LED_GREEN);
   }
 // handles PIT packets
 }
