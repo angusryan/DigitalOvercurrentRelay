@@ -4,50 +4,120 @@
  *
  *  This contains the functions for operating the periodic interrupt timer (PIT).
  *
- *  @author PMcL
- *  @date 2015-08-22
+ *  @author Lucien Tran & Angus Ryan
+ *  @date 2019-05-02
  */
 
-#ifndef PIT_H
-#define PIT_H
+/*!
+ *  @addtogroup PIT_module PIT module documentation
+ *  @{
+ */
 
-// new types
 #include "types.h"
+#include "PIT.h"
+#include "MK70F12.h"
+#include "LEDs.h"
+#include "OS.h"
+#include "accel.h"
+#include "packet.h"
+#include "median.h"
 
-/*! @brief Sets up the PIT before first use.
- *
- *  Enables the PIT and freezes the timer when debugging.
- *  @param moduleClk The module clock rate in Hz.
- *  @param userFunction is a pointer to a user callback function.
- *  @param userArguments is a pointer to the user arguments to use with the user callback function.
- *  @return bool - TRUE if the PIT was successfully initialized.
- *  @note Assumes that moduleClk has a period which can be expressed as an integral number of nanoseconds.
- */
-bool PIT_Init(const uint32_t moduleClk, void (*userFunction)(void*), void* userArguments);
+static uint32_t PIT_ModuleClk;
+static void *PITArguments;
+static void (*PITCallback)(void* PITArguments);
 
-/*! @brief Sets the value of the desired period of the PIT.
- *
- *  @param period The desired value of the timer period in nanoseconds.
- *  @param restart TRUE if the PIT is disabled, a new value set, and then enabled.
- *                 FALSE if the PIT will use the new value after a trigger event.
- *  @note The function will enable the timer and interrupts for the PIT.
- */
-void PIT_Set(const uint32_t period, const bool restart);
+OS_ECB* PITSemaphore; //Declare Semaphore
 
-/*! @brief Enables or disables the PIT.
- *
- *  @param enable - TRUE if the PIT is to be enabled, FALSE if the PIT is to be disabled.
- */
-void PIT_Enable(const bool enable);
+bool PIT_Init(const uint32_t moduleClk, void (*userFunction)(void*), void* userArguments)
+{
+  PITCallback = userFunction; /*!< Make the user function equal to PIT callback and accessible as global variable*/
+  PITArguments = userArguments; /*!< Make the user Argument a global variable*/
+  PIT_ModuleClk = moduleClk; /*!< Make the module clock a global variable to access in PIT_Set*/
 
-/*! @brief Interrupt service routine for the PIT.
- *
- *  The periodic interrupt timer has timed out.
- *  The user callback function will be called.
- *  @note Assumes the PIT has been initialized.
- */
-void __attribute__ ((interrupt)) PIT_ISR(void);
+  SIM_SCGC6 |= SIM_SCGC6_PIT_MASK; /*!< Enable PIT clock gate p356*/
 
-void PITThread(void* pData);
+  PIT_MCR &= ~PIT_MCR_MDIS_MASK; /*!< Bit is 1 by default. Needs to be cleared to enable setup of PIT*/
+  PIT_MCR |= PIT_MCR_FRZ_MASK; /*!< Bit Freeze is enabled - the counter is stopped during debug */
+  /*!< using Timer Control Register 0  - Channel 0-3 but choosing 0*/
+  PIT_TCTRL0 |= PIT_TCTRL_TIE_MASK; /*!< Enabling Interrupt TIE bit - p 1343 - Interrupt will be requested whenever Timer Interrupt flag is up*/
+  /*!< IRQ RTC seconds = 68
+   * 67%32 = 4 */
+  /*!< Using NVICICPR2 & NVICISER2 from table and example in interrupt*/
+  NVICICPR2 = (1 << 4);   /*!< Clear any pending interrupts with NVIC */
+  NVICISER2 = (1 << 4);  /*!< Enable interrupts with NVIC */
 
-#endif
+  PITSemaphore = OS_SemaphoreCreate(0); //Create a Semaphore
+  return true;
+
+}
+
+void PIT_Set(const uint32_t period, const bool restart)
+{
+  if(restart) /*!< if restart == TRUE, restart the timer is disabled, then, new value, then enabled*/
+  {
+    PIT_Enable(false);
+  }
+  // Read p 1345 of reference manual - equation found in example of PIT init
+  /*!< clock period = 1/ PIT_module clk as it has it to be in terms of seconds*/
+  uint32_t clockPeriod = 1000000000/PIT_ModuleClk; /*!< 1/25000000=40 in decimal = 0x28 in hexa*/
+  uint32_t triggerLDVAL = (period/clockPeriod) -1;
+  PIT_LDVAL0 = triggerLDVAL; /*!< Assign the trigger value at register0. Will assign a number to count down from*/
+  if(restart) /*!< enabled if restart =true */
+  {
+    PIT_Enable(true);
+  }
+}
+
+void PIT_Enable(const bool enable)
+{
+  if(enable)
+  {
+    PIT_TCTRL0 |= PIT_TCTRL_TEN_MASK; /*!< Enable PIT Timer at control register 0*/
+  }
+  else
+  {
+    PIT_TCTRL0 &= ~PIT_TCTRL_TEN_MASK; /*!< disable PIT Time at control Register 0*/
+  }
+}
+
+void __attribute__ ((interrupt)) PIT_ISR(void)
+{
+  OS_ISREnter(); //Enter Interrupt
+  /* Interrupt needs to be cleared at every ISR*/
+  /*  !< Using Timer Flag Register 0 */
+
+//  /*!< Hint3 of Lab3 - callback (green LED) is called at every ISR */
+//  if (PITCallback)
+//  {
+//    (*PITCallback)(PITArguments);
+//  }
+  PIT_TFLG0 |= PIT_TFLG_TIF_MASK; /*!< Clearing Timer Interrupt Flag after it is raised by writing 1 to it - p1344*/
+  while(OS_SemaphoreSignal(PITSemaphore) != OS_NO_ERROR); //Signal I2C Semaphore (triggering I2C thread) and ensure it returns no error
+  OS_ISRExit(); //Exit Interrupt
+}
+
+void PITThread(void* pData)
+{
+
+  for(;;)
+  {
+    OS_SemaphoreWait(PITSemaphore, 0);
+
+    /*!<Sets to 1 at the end of the timer period. Writing 1 to this flag clears it. Writing 0 has no effect. p 1344*/
+    if (CurrentMode == ACCEL_POLL) /*!< using RTC for ACCEL_POLL as the freq wanted is 1Hz and P = 1/Hz = 1 s*/
+    {
+      uint8_t data[3];
+      Accel_ReadXYZ(data);
+      data[0] = Median_Filter3(XYZstruct[0].axes.x, XYZstruct[1].axes.x, XYZstruct[2].axes.x);
+      data[1] = Median_Filter3(XYZstruct[0].axes.y, XYZstruct[1].axes.y, XYZstruct[2].axes.y);
+      data[2] = Median_Filter3(XYZstruct[0].axes.z, XYZstruct[1].axes.z, XYZstruct[2].axes.z);
+      Packet_Put(ACCEL_COMMAND, data[0], data[1], data[2]);
+      LEDs_Toggle(LED_GREEN);
+    }
+  }
+// handles PIT packets
+}
+
+/*!
+* @}
+*/
