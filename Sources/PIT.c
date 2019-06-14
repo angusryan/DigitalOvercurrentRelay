@@ -83,12 +83,6 @@ void __attribute__ ((interrupt)) PIT_ISR(void)
   OS_ISREnter(); //Enter Interrupt
   /* Interrupt needs to be cleared at every ISR*/
   /*  !< Using Timer Flag Register 0 */
-
-//  /*!< Hint3 of Lab3 - callback (green LED) is called at every ISR */
-//  if (PITCallback)
-//  {
-//    (*PITCallback)(PITArguments);
-//  }
   PIT_TFLG0 |= PIT_TFLG_TIF_MASK; /*!< Clearing Timer Interrupt Flag after it is raised by writing 1 to it - p1344*/
   while(OS_SemaphoreSignal(PITSemaphore) != OS_NO_ERROR); //Signal I2C Semaphore (triggering I2C thread) and ensure it returns no error
   OS_ISRExit(); //Exit Interrupt
