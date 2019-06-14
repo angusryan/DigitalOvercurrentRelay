@@ -35,11 +35,6 @@
 
 /*!< Header Files */
 #include "Cpu.h" /*!< CPU module - contains low level hardware initialization routines */
-#include "PE_Types.h"
-#include "PE_Error.h"
-#include "PE_Const.h"
-#include "IO_Map.h"
-#include "types.h"
 #include "OS.h"
 #include "analog.h"
 
@@ -76,12 +71,10 @@ void PacketHandlerThread(void* pData);
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint16_t STUDENT_ID = 0x1D6D; /*!< Student Number: 7533 */
 const uint32_t PIT_Period = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
-const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {1, 2};
+const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4};
 const uint8_t PACKET_ACK_MASK; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
-
-
 
 /*! @brief Data structure used to pass Analog configuration to a user thread
  *
@@ -91,6 +84,7 @@ typedef struct AnalogThreadData
   OS_ECB* semaphore;
   uint8_t channelNb;
 } TAnalogThreadData;
+
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
 
 TFTMChannel FTMPacket =
@@ -121,10 +115,12 @@ static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
 typedef enum
 {
   TOWER_INIT_PRI,
-  UART_TX_PRI,
   UART_RX_PRI,
-  FTM_PRI,
+  UART_TX_PRI,
+  ANALOG_CHANNEL_1,
+  ANALOG_CHANNEL_2,
   PIT_PRI,
+  FTM_PRI,
   PACKET_HANDLER_PRI
 }TPRIORITIES;
 
@@ -207,14 +203,14 @@ void AnalogLoopbackThread(void* pData)
 int main(void)
 /*lint -restore Enable MISRA rule (6.3) checking. */
 {
-  OS_DisableInterrupts(); /*!< Disable the interrupts using OS library */
+ // OS_DisableInterrupts(); /*!< Disable the interrupts using OS library */
   // Initialise low-level clocks etc using Processor Expert code
   PE_low_level_init();
   // Initialize the RTOS
   OS_Init(CPU_CORE_CLK_HZ, true);
   ThreadsInit(); /*!< Creates the Threads */
   PacketHandlerSemaphore = OS_SemaphoreCreate(0);
-  OS_EnableInterrupts(); /*!< Re-enabling interrupts after initiating  the adequate modules*/
+ // OS_EnableInterrupts(); /*!< Re-enabling interrupts after initiating  the adequate modules*/
   // Start multithreading - never returns!
   OS_Start();
 }
@@ -241,9 +237,14 @@ void ThreadsInit()
  */
 void TowerInitThread(void* pData)
 {
-  for(;;)
-  {
+
     OS_DisableInterrupts();
+    (void)Analog_Init(CPU_BUS_CLK_HZ);
+    // Generate the global analog semaphores
+    for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+      AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
+    LPTMRInit(10);
+    // Initialise the low power timer to tick every 10 ms
     Flash_Init();
     /*!<  Allocate var for both Tower Number and Mode, if succcessful, FlashWrite16 them with the right values */
     bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
@@ -264,18 +265,11 @@ void TowerInitThread(void* pData)
       }
     }
     FTM_Set(&FTMPacket); /*!< configure FTM0 functionality, passing in the declared struct address containing values at top of file */
-    StartupPackets(); /*!< Sends Packets from Device to PC on Startup. */
+
     OS_EnableInterrupts();
     while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
     // Analog
-    (void)Analog_Init(CPU_BUS_CLK_HZ);
-    // Generate the global analog semaphores
-    for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-      AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
-    // Initialise the low power timer to tick every 10 ms
-    LPTMRInit(10);
     OS_ThreadDelete(TOWER_INIT_PRI);
-  }
 }
 
 /*! @brief The Packet Handler Thread
@@ -284,6 +278,7 @@ void TowerInitThread(void* pData)
  */
 void PacketHandlerThread(void* pData)
 {
+  StartupPackets(); /*!< Sends Packets from Device to PC on Startup. */
   OS_SemaphoreWait(PacketHandlerSemaphore, 0); //Wait until triggered by Semaphore Signal
   for(;;)
   {

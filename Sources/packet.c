@@ -19,8 +19,6 @@
 #include "OS.h"
 
 TPacket Packet;
-static uint8_t packetComplete = 0;
-
 
 
 bool Packet_Init(const uint32_t baudRate, const uint32_t moduleClk)
@@ -30,6 +28,7 @@ bool Packet_Init(const uint32_t baudRate, const uint32_t moduleClk)
 
 bool Packet_Get(void)
 {
+  static uint8_t packetComplete = 0;
   uint8_t byteSum; /*!< To check if the checksum is correct */
   /*!< using switch per Packet videos in Lab Videos by Peter McLean */
   while (1)
@@ -105,32 +104,12 @@ bool Packet_Put(const uint8_t command, const uint8_t parameter1, const uint8_t p
   OS_DisableInterrupts();
   uint8_t byteSum;
 
-  if(!UART_OutChar(command))
-  {
-    OS_EnableInterrupts();
-    return false;
-  }
-  if(!UART_OutChar(parameter1))
-  {
-    OS_EnableInterrupts();
-    return false;
-  }
-  if(!UART_OutChar(parameter2))
-  {
-    OS_EnableInterrupts();
-    return false;
-  }
-  if(!UART_OutChar(parameter3))
-  {
-    OS_EnableInterrupts();
-    return false;
-  }
+  UART_OutChar(command);
+  UART_OutChar(parameter1);
+  UART_OutChar(parameter2);
+  UART_OutChar(parameter3);
   byteSum = Checksum_Calculation(command, parameter1, parameter2, parameter3);
-  if(!UART_OutChar(byteSum))
-  {
-    OS_EnableInterrupts();
-    return false;
-  }
+  UART_OutChar(byteSum);
   OS_EnableInterrupts();
   return true;
 }
