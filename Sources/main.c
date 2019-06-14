@@ -1,41 +1,105 @@
 /* ###################################################################
- **     Filename    : main.c
- **     Project     : Lab6
- **     Processor   : MK70FN1M0VMJ12
- **     Version     : Driver 01.01
- **     Compiler    : GNU C Compiler
- **     Date/Time   : 2015-07-20, 13:27, # CodeGen: 0
- **     Abstract    :
- **         Main module.
- **         This module contains user's application code.
- **     Settings    :
- **     Contents    :
- **         No public methods
- **
- ** ###################################################################*/
+**     Filename    : main.c
+**     Project     : Digital Overcurrent Relay
+**     Processor   : MK70FN1M0VMJ12
+**     Version     : Driver 01.01
+**     Compiler    : GNU C Compiler
+**     Date/Time   : 2019-04-16, 10:23, # CodeGen: 0
+**     Abstract    :
+**         main module
+**     Settings    :
+**     Contents    :
+**         public methods
+**
+** ###################################################################*/
 /*!
- ** @file main.c
- ** @version 6.0
- ** @brief
- **         Main module.
- **         This module contains user's application code.
- */
+** @file main.c
+** @version 6.0
+** @brief
+**         main module.
+**         This module is the main.
+*/
 /*!
- **  @addtogroup main_module main module documentation
- **  @{
+**  @addtogroup main_module main module documentation
+**  @{
+*/
+/*! @file
+ *
+ *  @brief Main on the TWR-K70F120M.
+ *
+ *  Is the Main Module.
+ *
+ *  @author Lucien Tran & Angus Ryan
+ *  @date 2019-04-16
  */
-/* MODULE main */
 
-// CPU module - contains low level hardware initialization routines
+/*!< CPU module - contains low level hardware initialization routines */
 #include "Cpu.h"
+#include "Events.h"
+#include "PE_Types.h"
+#include "PE_Error.h"
+#include "PE_Const.h"
+#include "IO_Map.h"
 
-// Simple OS
+/*!< Header Files */
+#include "types.h"
+#include "Flash.h"
+#include "packet.h"
+#include "UART.h"
+#include "LEDs.h"
+#include "PIT.h"
 #include "OS.h"
-
-// Analog functions
 #include "analog.h"
 
-//main
+/****************************************************************************************************************
+ * Private function declaration
+ ***************************************************************************************************************/
+bool PacketHandler(void);
+bool StartupPackets(void);
+bool VersionPackets(void);
+bool TowerNumberPackets(void);
+bool TowerModePackets(void);
+bool ProgramBytePackets(void);
+bool ReadBytePackets(void);
+bool TowerInit(void);
+bool ClockInit(void);
+bool TowerTimePackets(void);
+bool ProtocolPackets(void);
+void ThreadsInit(void);
+void TowerInitThread(void* pData);
+void PacketHandlerThread(void* pData);
+
+/****************************************************************************************************************
+ * Global variables and macro definitions
+ ***************************************************************************************************************/
+const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
+const uint16_t STUDENT_ID = 0x1D6D; /*!< Student Number: 7533 */
+const uint32_t PIT_Pebriod = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
+const uint8_t PACKET_ACK_MASK; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
+static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
+static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
+#define THREAD_STACK_SIZE 300
+
+typedef enum
+{
+  TOWER_INIT_PRI,
+  UART_TX_PRI,
+  UART_RX_PRI,
+  PIT_PRI,
+  PACKET_HANDLER_PRI
+}TPRIORITIES;
+
+
+OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(FTMStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(RTCStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(PITStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(UARTRXStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(UARTTXStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(I2CStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(AccelStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
 
 // ----------------------------------------
 // Thread set up
@@ -168,33 +232,331 @@ void AnalogLoopbackThread(void* pData)
 int main(void)
 /*lint -restore Enable MISRA rule (6.3) checking. */
 {
-  OS_ERROR error;
-
+  OS_DisableInterrupts(); /*!< Disable the interrupts using OS library */
   // Initialise low-level clocks etc using Processor Expert code
   PE_low_level_init();
-
   // Initialize the RTOS
   OS_Init(CPU_CORE_CLK_HZ, true);
-
-  // Create module initialisation thread
-  error = OS_ThreadCreate(InitModulesThread,
-                          NULL,
-                          &InitModulesThreadStack[THREAD_STACK_SIZE - 1],
-                          0); // Highest priority
-
-  // Create threads for 2 analog loopback channels
-  for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
-  {
-    error = OS_ThreadCreate(AnalogLoopbackThread,
-                            &AnalogThreadData[threadNb],
-                            &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1],
-                            ANALOG_THREAD_PRIORITIES[threadNb]);
-  }
-
+  ThreadsInit(); /*!< Creates the Threads */
+  PacketHandlerSemaphore = OS_SemaphoreCreate(0);
+  OS_EnableInterrupts(); /*!< Re-enabling interrupts after initiating  the adequate modules*/
   // Start multithreading - never returns!
   OS_Start();
 }
 
-/*!
- ** @}
+void ThreadsInit()
+{
+  while (OS_ThreadCreate(TowerInitThread, NULL, &TowerInitStack[THREAD_STACK_SIZE-1], TOWER_INIT_PRI) != OS_NO_ERROR); //Tower Initiation thread
+  while (OS_ThreadCreate(FTMThread, NULL, &FTMStack[THREAD_STACK_SIZE-1], FTM_PRI) != OS_NO_ERROR); //FTM Thread
+  while (OS_ThreadCreate(PITThread, NULL, &PITStack[THREAD_STACK_SIZE-1], PIT_PRI) != OS_NO_ERROR); //PIT Thread
+  while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
+  while (OS_ThreadCreate(UARTRXThread, NULL, &UARTRXStack[THREAD_STACK_SIZE-1], UART_RX_PRI) != OS_NO_ERROR); //UARTRX Thread
+  while (OS_ThreadCreate(UARTTXThread, NULL, &UARTTXStack[THREAD_STACK_SIZE-1], UART_TX_PRI) != OS_NO_ERROR); //UARTTX Thread
+  // Create threads for 2 analog loopback channels
+  for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
+  {
+    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb] != OS_NO_ERROR);
+  }
+}
+
+/*! @brief The Tower Initiation Thread
+ *
+ *  @note - Deletes upon completion of tower initiation
+ *  @return enum - relating to error code
  */
+void TowerInitThread(void* pData)
+{
+  for(;;)
+  {
+    OS_DisableInterrupts();
+    Flash_Init();
+    /*!<  Allocate var for both Tower Number and Mode, if succcessful, FlashWrite16 them with the right values */
+    bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
+    bool towerNumberInit = Flash_AllocateVar((volatile void **) &TowerNumber, sizeof(*TowerNumber));
+    if (towerModeInit && towerNumberInit && LEDs_Init())
+    {
+      if (TowerMode->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
+      {
+        Flash_Write16((volatile uint16_t *) TowerMode, 0x1); /*!< Parsing through the function: typecast volatile uint16_t pointer from uint16union_t pointer, and default towerMode = 1 */
+      }
+      if (TowerNumber->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
+      {
+        Flash_Write16((volatile uint16_t *) TowerNumber, STUDENT_ID); /*Like above, but with towerNumber set to our student ID = 7533*/
+      }
+      if (PIT_Init(CPU_CORE_CLK_HZ, (void*) &PITCallback, NULL) && (Packet_Init(BAUDRATE, CPU_CORE_CLK_HZ)) && FTM_Init())
+      { /*!< Initiate all required modules */
+        PIT_Set(PIT_Period, true);
+      }
+    }
+    FTM_Set(&FTMPacket); /*!< configure FTM0 functionality, passing in the declared struct address containing values at top of file */
+    StartupPackets(); /*!< Sends Packets from Device to PC on Startup. */
+    OS_EnableInterrupts();
+    while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
+    OS_ThreadDelete(TOWER_INIT_PRI);
+  }
+}
+
+/*! @brief The Packet Handler Thread
+ *
+ *  @note - Loops until interrupted by thread of higher priority
+ */
+void PacketHandlerThread(void* pData)
+{
+  OS_SemaphoreWait(PacketHandlerSemaphore, 0); //Wait until triggered by Semaphore Signal
+  for(;;)
+  {
+    if (Packet_Get())
+    {
+      FTM_StartTimer(&FTMPacket); /*!< Start timer, calling interrupt User function (FTM0Callback) once completed.  */
+      LEDs_On(LED_BLUE);
+      PacketHandler(); /*!<  When a complete packet is finally formed, handle the packet accordingly */
+    }
+  }
+}
+
+/*! @brief Send the packets needed on startup
+
+ *  @return bool - TRUE if packet has been sent successfully
+ *  @note Assumes that Packet_Init was called
+ */
+bool StartupPackets(void)
+{
+  if (Packet_Put(TOWER_STARTUP_COMMAND, TOWER_STARTUP_PARAMETER1, TOWER_STARTUP_PARAMETER2, TOWER_STARTUP_PARAMETER3))
+  {
+    if (Packet_Put(TOWER_VERSION_COMMAND, TOWER_VERSION_PARAMETER1, TOWER_VERSION_PARAMETER2, TOWER_VERSION_PARAMETER3))
+    {
+      if (Packet_Put(TOWER_NUMBER_COMMAND, TOWER_NUMBER_PARAMETER1, TowerNumber->s.Lo, TowerNumber->s.Hi))
+      {
+        if (Packet_Put(TOWER_MODE_COMMAND,TOWER_MODE_GET, TowerMode->s.Lo, TowerMode->s.Hi))
+        {
+          if (CurrentMode == ACCEL_POLL)
+          {
+            return Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_ASYNC, PROTOCOL_PARAMETER3);
+          }
+          else if (CurrentMode == ACCEL_INT)
+          {
+            return Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_SYNC, PROTOCOL_PARAMETER3);
+          }
+        }
+      }
+    }
+  }
+}
+
+/*! @brief Send the version packet to the PC
+ *
+ *  @return bool - TRUE if packet has been sent successfully
+ *  @note Assumes that Packet_Init was called
+ */
+bool VersionPackets(void)
+{
+  return Packet_Put(TOWER_VERSION_COMMAND,TOWER_VERSION_PARAMETER1,TOWER_VERSION_PARAMETER2, TOWER_VERSION_PARAMETER3);
+}
+
+/*! @brief Send the tower number packet to the PC
+ *
+ *  @return bool - TRUE if packet has been sent successfully
+ *  @note Assumes that Packet_Init was called
+ */
+bool TowerNumberPackets(void)
+{
+  if (Packet_Parameter1 == (uint8_t) 1)
+  {
+    // if Parameter1 = 1 - get the tower number and send it to PC
+    return Packet_Put(TOWER_NUMBER_COMMAND, TOWER_NUMBER_GET, TowerNumber->s.Lo, TowerNumber->s.Hi);
+  }
+  else if (Packet_Parameter1 == (uint8_t) 2) // if Parameter1 =2 - write new TowerNumber to Flash and send it to interface
+  {
+    uint16union_t newTowerNumber; /*! < create a union variable to combine the two Parameters*/
+    newTowerNumber.s.Lo = Packet_Parameter2;
+    newTowerNumber.s.Hi = Packet_Parameter3;
+    Flash_Write16((volatile uint16_t *) TowerNumber, newTowerNumber.l);
+    return Packet_Put(TOWER_NUMBER_COMMAND, TOWER_NUMBER_SET, TowerNumber->s.Lo, TowerNumber->s.Hi);
+  }
+}
+
+/*! @brief Send the tower mode packet to the PC
+ *
+ *  @return bool - TRUE if packet has been sent successfully
+ *  @note Assumes that Packet_Init was called
+ */
+bool TowerModePackets(void)
+{
+  if (Packet_Parameter1 == 1) // if paramater1 = 1 - get the towermode and send it to PC
+  {
+    return Packet_Put(TOWER_MODE_COMMAND,TOWER_MODE_GET, TowerMode->s.Lo, TowerMode->s.Hi);
+  }
+  else if (Packet_Parameter1 == 2) // if parameter1 = 2 - set the towermode, write to Flash and send it back to PC
+  {
+    uint16union_t newTowerMode; /* !< Create a union variable to combine parameter2 and 3*/
+    newTowerMode.s.Lo = Packet_Parameter2;
+    newTowerMode.s.Hi = Packet_Parameter3;
+    Flash_Write16((volatile uint16_t *) TowerMode, newTowerMode.l);
+    return Packet_Put(TOWER_MODE_COMMAND,TOWER_MODE_SET, TowerMode->s.Lo, TowerMode->s.Hi);
+  }
+  return false;
+}
+
+/*! @brief Handles the packet to program bytes in FLASH
+ *
+ *  @return bool - TRUE if packet has been sent and handled successfully
+ *  @note Assumes that Packet_Init was called
+ */
+bool ProgramBytePackets(void)
+{
+  if (Packet_Parameter1 == 8)
+  {
+    return Flash_Erase(); /*! < if Parameter1  = 8 - erase the whole sector */
+  }
+  else if (Packet_Parameter1 > 8)
+  {
+    return false; //data sent is obsolete
+  }
+  else /*!< if offset (Parameter1) is between 0 and 7 inclusive, check the offset */
+  {
+    volatile uint8_t *address = (uint8_t *)(FLASH_DATA_START + Packet_Parameter1);
+    return Flash_Write8(address, Packet_Parameter3); //Write in the Flash
+  }
+  return false;
+}
+
+/*! @brief Handles the packet to read bytes from FLASH
+ *
+ *  @return bool - TRUE if packet has been sent and handled successfully
+ *  @note Assumes that Packet_Init was called
+ */
+bool ReadBytePackets(void)
+{
+  uint8_t readByte = _FB(FLASH_DATA_START + Packet_Parameter1); /* !< fetching the Byte at offset Parameter1 and send it to PCc*/
+  return Packet_Put(FLASH_READ_COMMAND, Packet_Parameter1, 0x0, readByte);
+}
+
+/*! @brief Handles the packet RTC time - sends back ther packet to PC if setting time is successful
+ *
+ *  @return bool - TRUE if packet has been sent and handled successfully
+ *  @note Assumes that Packet_Init and RTC_Init was called
+ */
+bool TowerTimePackets(void)
+{
+  /*!< Checking if input is valid, if not, return false */
+  if (Packet_Parameter1 <= 23)
+  {
+    if (Packet_Parameter2 <= 59)
+    {
+      if (Packet_Parameter3 <= 59)
+      {
+	/*!< sets the time with packet parameters given by PC */
+        RTC_Set(Packet_Parameter1, Packet_Parameter2, Packet_Parameter3);
+        /*!< returns the original packet to the PC if successful */
+        return Packet_Put(SET_TIME_COMMAND, Packet_Parameter1, Packet_Parameter2, Packet_Parameter3);
+      }
+    }
+  }
+  return false;
+}
+
+/*! @brief Process the packet that has been received
+ *
+ *  @return bool - TRUE if the packet has been handled properly.
+ *  @note Assumes that Packet_Init and Packet_Get was called
+ */
+bool PacketHandler(void)
+{
+  /*!<  Packet Handler used if Packet Get is successful*/
+  bool actionSuccess;  /*!<  Acknowledge is false as long as the package isn't acknowledge or if it's not required */
+  switch (Packet_Command & ~PACKET_ACK_MASK)
+  {
+    case TOWER_STARTUP_COMMAND:
+      actionSuccess = StartupPackets();
+      break;
+
+    case TOWER_VERSION_COMMAND:
+      actionSuccess = VersionPackets();
+      break;
+
+    case TOWER_NUMBER_COMMAND:
+      actionSuccess = TowerNumberPackets();
+      break;
+
+    case TOWER_MODE_COMMAND:
+      actionSuccess = TowerModePackets();
+      break;
+
+    case FLASH_PROGRAM_COMMAND:
+      actionSuccess = ProgramBytePackets();
+      break;
+
+    case FLASH_READ_COMMAND:
+      actionSuccess = ReadBytePackets();
+      break;
+
+    case SET_TIME_COMMAND:
+      actionSuccess = TowerTimePackets();
+      break;
+
+    case PROTOCOL_COMMAND:
+      actionSuccess = ProtocolPackets();
+      break;
+
+  }
+
+  if (Packet_Command & PACKET_ACK_MASK) /*!< if ACK bit is set, need to send back ACK packet if done successfully and NAK packet with bit7 cleared */
+  {
+    if (actionSuccess)
+    {
+      Packet_Put(Packet_Command, Packet_Parameter1, Packet_Parameter2, Packet_Parameter3);
+    }
+    else
+    {
+      Packet_Put((Packet_Command |=PACKET_ACK_MASK),Packet_Parameter1, Packet_Parameter2, Packet_Parameter3);
+    }
+  }
+}
+
+/*! @brief Handles the protocol packets
+ *
+ *  @return bool - TRUE if packet has been sent and handled successfully
+ *  @note Assumes that Packet_Init and Accel_Init was called
+ */
+bool ProtocolPackets(void)
+{
+  if (Packet_Parameter1 == PROTOCOL_GET) /*!< Get the Protocol Mode */
+  {
+    if (CurrentMode == ACCEL_POLL)
+    {
+      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_ASYNC, PROTOCOL_PARAMETER3); /*!< Send the current mode to the PC*/
+    }
+    else if (CurrentMode == ACCEL_INT)
+    {
+      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_SYNC, PROTOCOL_PARAMETER3); /*!< Send the current mode to the PC*/
+    }
+  }
+  else if (Packet_Parameter1 == PROTOCOL_SET) /*!< Set the Protocol Mode */
+  {
+    if (Packet_Parameter2 == PROTOCOL_ASYNC) /*!< If parameter2 == 0, set the mode to poll - asynchronous */
+    {
+      Accel_SetMode(ACCEL_POLL);
+      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_ASYNC, PROTOCOL_PARAMETER3);
+    }
+    else if (Packet_Parameter2 == PROTOCOL_SYNC) /*!< If parameter2 == 1, set the mode to interrupt - synchronous  */
+    {
+      Accel_SetMode(ACCEL_INT);
+      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_SYNC, PROTOCOL_PARAMETER3);
+    }
+  }
+}
+
+
+
+/*
+** ###################################################################
+**
+**     This file was created by Processor Expert 10.5 [05.21]
+**     for the Freescale Kinetis series of microcontrollers.
+**
+** ###################################################################
+*/
+/*!
+* @}
+*/
+\
