@@ -1,28 +1,49 @@
-Sources/main.o: ../Sources/main.c \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/Cpu.h \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/PE_Types.h \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/PE_Error.h \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/PE_Const.h \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/IO_Map.h \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Static_Code/IO_Map/MK70F12.h \
- C:\Users\PMcL\Documents\Subjects\48434\ Embedded\ Software\5\ Projects\Odd\ Autumn\Template\Library/OS.h \
- C:\Users\PMcL\Documents\Subjects\48434\ Embedded\ Software\5\ Projects\Odd\ Autumn\Template\Library/analog.h \
- C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Sources/types.h
+Sources/main.o: ../Sources/main.c D:/angus/Generated_Code/Cpu.h \
+ D:/angus/Generated_Code/PE_Types.h D:/angus/Generated_Code/PE_Error.h \
+ D:/angus/Generated_Code/PE_Const.h D:/angus/Generated_Code/IO_Map.h \
+ D:/angus/Static_Code/IO_Map/MK70F12.h D:/angus/Generated_Code/PE_Types.h \
+ D:/angus/Generated_Code/PE_Error.h D:/angus/Generated_Code/PE_Const.h \
+ D:/angus/Generated_Code/IO_Map.h ../Sources/types.h ../Sources/Flash.h \
+ ../Sources/packet.h ../Sources/UART.h ../Sources/LEDs.h ../Sources/PIT.h \
+ D:\angus\Library/OS.h D:\angus\Library/analog.h D:/angus/Sources/types.h \
+ ../Sources/FTM.h
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/Cpu.h:
+D:/angus/Generated_Code/Cpu.h:
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/PE_Types.h:
+D:/angus/Generated_Code/PE_Types.h:
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/PE_Error.h:
+D:/angus/Generated_Code/PE_Error.h:
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/PE_Const.h:
+D:/angus/Generated_Code/PE_Const.h:
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Generated_Code/IO_Map.h:
+D:/angus/Generated_Code/IO_Map.h:
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Static_Code/IO_Map/MK70F12.h:
+D:/angus/Static_Code/IO_Map/MK70F12.h:
 
-C:\Users\PMcL\Documents\Subjects\48434\ Embedded\ Software\5\ Projects\Odd\ Autumn\Template\Library/OS.h:
+D:/angus/Generated_Code/PE_Types.h:
 
-C:\Users\PMcL\Documents\Subjects\48434\ Embedded\ Software\5\ Projects\Odd\ Autumn\Template\Library/analog.h:
+D:/angus/Generated_Code/PE_Error.h:
 
-C:/Users/PMcL/Documents/Subjects/48434\ Embedded\ Software/5\ Projects/Odd\ Autumn/Template/Sources/types.h:
+D:/angus/Generated_Code/PE_Const.h:
+
+D:/angus/Generated_Code/IO_Map.h:
+
+../Sources/types.h:
+
+../Sources/Flash.h:
+
+../Sources/packet.h:
+
+../Sources/UART.h:
+
+../Sources/LEDs.h:
+
+../Sources/PIT.h:
+
+D:\angus\Library/OS.h:
+
+D:\angus\Library/analog.h:
+
+D:/angus/Sources/types.h:
+
+../Sources/FTM.h:

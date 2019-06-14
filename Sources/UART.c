@@ -1,4 +1,3 @@
-```
 /* ###################################################################
 **     Filename    : UART.c
 **     Project     : Digital Overcurrent Relay

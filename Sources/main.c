@@ -35,7 +35,6 @@
 
 /*!< CPU module - contains low level hardware initialization routines */
 #include "Cpu.h"
-#include "Events.h"
 #include "PE_Types.h"
 #include "PE_Error.h"
 #include "PE_Const.h"
@@ -50,6 +49,7 @@
 #include "PIT.h"
 #include "OS.h"
 #include "analog.h"
+#include "FTM.h"
 
 /****************************************************************************************************************
  * Private function declaration
@@ -74,48 +74,14 @@ void PacketHandlerThread(void* pData);
  ***************************************************************************************************************/
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint16_t STUDENT_ID = 0x1D6D; /*!< Student Number: 7533 */
-const uint32_t PIT_Pebriod = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
+const uint32_t PIT_Period = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
 const uint8_t PACKET_ACK_MASK; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
 #define THREAD_STACK_SIZE 300
 
-typedef enum
-{
-  TOWER_INIT_PRI,
-  UART_TX_PRI,
-  UART_RX_PRI,
-  PIT_PRI,
-  PACKET_HANDLER_PRI
-}TPRIORITIES;
-
-
-OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(FTMStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(RTCStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(PITStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(UARTRXStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(UARTTXStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(I2CStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(AccelStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
-OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
-
-// ----------------------------------------
-// Thread set up
-// ----------------------------------------
 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
-#define THREAD_STACK_SIZE 100
 #define NB_ANALOG_CHANNELS 2
-
-// Thread stacks
-OS_THREAD_STACK(InitModulesThreadStack, THREAD_STACK_SIZE); /*!< The stack for the LED Init thread. */
-static uint32_t AnalogThreadStacks[NB_ANALOG_CHANNELS][THREAD_STACK_SIZE] __attribute__ ((aligned(0x08)));
-
-// ----------------------------------------
-// Thread priorities
-// 0 = highest priority
-// ----------------------------------------
 const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {1, 2};
 
 /*! @brief Data structure used to pass Analog configuration to a user thread
@@ -126,6 +92,18 @@ typedef struct AnalogThreadData
   OS_ECB* semaphore;
   uint8_t channelNb;
 } TAnalogThreadData;
+OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
+
+TFTMChannel FTMPacket =
+{
+  0, /*!< Channel being used */
+  CPU_MCGFF_CLK_HZ_CONFIG_0, /*!< delay count: fixed frequency clock, mentioned in Timing and Generation Docs */
+  TIMER_FUNCTION_OUTPUT_COMPARE, /*!< Brief specific: we are using OutputCompare*/
+  TIMER_OUTPUT_LOW, /*!< Choose one functionality of output compare: low */
+  NULL, /*!< Setting User Callback Function NOW UNUSED */
+  (void*) 0, /*!< User callback arguments being passed  NOW UNUSED */
+};
+
 
 /*! @brief Analog thread configuration data
  *
@@ -141,6 +119,40 @@ static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
     .channelNb = 1
   }
 };
+
+typedef enum
+{
+  TOWER_INIT_PRI,
+  UART_TX_PRI,
+  UART_RX_PRI,
+  FTM_PRI,
+  PIT_PRI,
+  PACKET_HANDLER_PRI
+}TPRIORITIES;
+
+static uint32_t AnalogThreadStacks[NB_ANALOG_CHANNELS][THREAD_STACK_SIZE] __attribute__ ((aligned(0x08)));
+OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(FTMStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(PITStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(UARTRXStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(UARTTXStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
+
+
+// ----------------------------------------
+// Thread set up
+// ----------------------------------------
+
+
+// Thread stacks
+
+
+
+// ----------------------------------------
+// Thread priorities
+// 0 = highest priority
+// ----------------------------------------
+
 
 void LPTMRInit(const uint16_t count)
 {
@@ -255,7 +267,7 @@ void ThreadsInit()
   // Create threads for 2 analog loopback channels
   for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
   {
-    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb] != OS_NO_ERROR);
+    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
   }
 }
 
@@ -283,7 +295,7 @@ void TowerInitThread(void* pData)
       {
         Flash_Write16((volatile uint16_t *) TowerNumber, STUDENT_ID); /*Like above, but with towerNumber set to our student ID = 7533*/
       }
-      if (PIT_Init(CPU_CORE_CLK_HZ, (void*) &PITCallback, NULL) && (Packet_Init(BAUDRATE, CPU_CORE_CLK_HZ)) && FTM_Init())
+      if (PIT_Init(CPU_CORE_CLK_HZ,NULL, NULL) && (Packet_Init(BAUDRATE, CPU_CORE_CLK_HZ)) && FTM_Init())
       { /*!< Initiate all required modules */
         PIT_Set(PIT_Period, true);
       }
@@ -327,17 +339,7 @@ bool StartupPackets(void)
     {
       if (Packet_Put(TOWER_NUMBER_COMMAND, TOWER_NUMBER_PARAMETER1, TowerNumber->s.Lo, TowerNumber->s.Hi))
       {
-        if (Packet_Put(TOWER_MODE_COMMAND,TOWER_MODE_GET, TowerMode->s.Lo, TowerMode->s.Hi))
-        {
-          if (CurrentMode == ACCEL_POLL)
-          {
-            return Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_ASYNC, PROTOCOL_PARAMETER3);
-          }
-          else if (CurrentMode == ACCEL_INT)
-          {
-            return Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_SYNC, PROTOCOL_PARAMETER3);
-          }
-        }
+        return (Packet_Put(TOWER_MODE_COMMAND,TOWER_MODE_GET, TowerMode->s.Lo, TowerMode->s.Hi));
       }
     }
   }
@@ -446,7 +448,7 @@ bool TowerTimePackets(void)
       if (Packet_Parameter3 <= 59)
       {
 	/*!< sets the time with packet parameters given by PC */
-        RTC_Set(Packet_Parameter1, Packet_Parameter2, Packet_Parameter3);
+
         /*!< returns the original packet to the PC if successful */
         return Packet_Put(SET_TIME_COMMAND, Packet_Parameter1, Packet_Parameter2, Packet_Parameter3);
       }
@@ -494,9 +496,6 @@ bool PacketHandler(void)
       actionSuccess = TowerTimePackets();
       break;
 
-    case PROTOCOL_COMMAND:
-      actionSuccess = ProtocolPackets();
-      break;
 
   }
 
@@ -513,38 +512,7 @@ bool PacketHandler(void)
   }
 }
 
-/*! @brief Handles the protocol packets
- *
- *  @return bool - TRUE if packet has been sent and handled successfully
- *  @note Assumes that Packet_Init and Accel_Init was called
- */
-bool ProtocolPackets(void)
-{
-  if (Packet_Parameter1 == PROTOCOL_GET) /*!< Get the Protocol Mode */
-  {
-    if (CurrentMode == ACCEL_POLL)
-    {
-      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_ASYNC, PROTOCOL_PARAMETER3); /*!< Send the current mode to the PC*/
-    }
-    else if (CurrentMode == ACCEL_INT)
-    {
-      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_SYNC, PROTOCOL_PARAMETER3); /*!< Send the current mode to the PC*/
-    }
-  }
-  else if (Packet_Parameter1 == PROTOCOL_SET) /*!< Set the Protocol Mode */
-  {
-    if (Packet_Parameter2 == PROTOCOL_ASYNC) /*!< If parameter2 == 0, set the mode to poll - asynchronous */
-    {
-      Accel_SetMode(ACCEL_POLL);
-      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_ASYNC, PROTOCOL_PARAMETER3);
-    }
-    else if (Packet_Parameter2 == PROTOCOL_SYNC) /*!< If parameter2 == 1, set the mode to interrupt - synchronous  */
-    {
-      Accel_SetMode(ACCEL_INT);
-      Packet_Put(PROTOCOL_COMMAND, PROTOCOL_PARAMETER1, PROTOCOL_SYNC, PROTOCOL_PARAMETER3);
-    }
-  }
-}
+
 
 
 
@@ -559,4 +527,4 @@ bool ProtocolPackets(void)
 /*!
 * @}
 */
-\
+
