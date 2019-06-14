@@ -33,22 +33,21 @@
  *  @date 2019-04-16
  */
 
-/*!< CPU module - contains low level hardware initialization routines */
-#include "Cpu.h"
+/*!< Header Files */
+#include "Cpu.h" /*!< CPU module - contains low level hardware initialization routines */
 #include "PE_Types.h"
 #include "PE_Error.h"
 #include "PE_Const.h"
 #include "IO_Map.h"
-
-/*!< Header Files */
 #include "types.h"
+#include "OS.h"
+#include "analog.h"
+
 #include "Flash.h"
 #include "packet.h"
 #include "UART.h"
 #include "LEDs.h"
 #include "PIT.h"
-#include "OS.h"
-#include "analog.h"
 #include "FTM.h"
 
 /****************************************************************************************************************
@@ -72,17 +71,17 @@ void PacketHandlerThread(void* pData);
 /****************************************************************************************************************
  * Global variables and macro definitions
  ***************************************************************************************************************/
+#define THREAD_STACK_SIZE 300 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
+#define NB_ANALOG_CHANNELS 2
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint16_t STUDENT_ID = 0x1D6D; /*!< Student Number: 7533 */
 const uint32_t PIT_Period = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
+const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {1, 2};
 const uint8_t PACKET_ACK_MASK; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
-#define THREAD_STACK_SIZE 300
 
-// Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
-#define NB_ANALOG_CHANNELS 2
-const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {1, 2};
+
 
 /*! @brief Data structure used to pass Analog configuration to a user thread
  *
@@ -103,7 +102,6 @@ TFTMChannel FTMPacket =
   NULL, /*!< Setting User Callback Function NOW UNUSED */
   (void*) 0, /*!< User callback arguments being passed  NOW UNUSED */
 };
-
 
 /*! @brief Analog thread configuration data
  *
@@ -137,22 +135,6 @@ OS_THREAD_STACK(PITStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(UARTRXStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(UARTTXStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
-
-
-// ----------------------------------------
-// Thread set up
-// ----------------------------------------
-
-
-// Thread stacks
-
-
-
-// ----------------------------------------
-// Thread priorities
-// 0 = highest priority
-// ----------------------------------------
-
 
 void LPTMRInit(const uint16_t count)
 {
@@ -199,25 +181,6 @@ void __attribute__ ((interrupt)) LPTimer_ISR(void)
   // Signal the analog channels to take a sample
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
     (void)OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore);
-}
-
-/*! @brief Initialises modules.
- *
- */
-static void InitModulesThread(void* pData)
-{
-  // Analog
-  (void)Analog_Init(CPU_BUS_CLK_HZ);
-
-  // Generate the global analog semaphores
-  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-    AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
-
-  // Initialise the low power timer to tick every 10 ms
-  LPTMRInit(10);
-
-  // We only do this once - therefore delete this thread
-  OS_ThreadDelete(OS_PRIORITY_SELF);
 }
 
 /*! @brief Samples a value on an ADC channel and sends it to the corresponding DAC channel.
@@ -304,6 +267,13 @@ void TowerInitThread(void* pData)
     StartupPackets(); /*!< Sends Packets from Device to PC on Startup. */
     OS_EnableInterrupts();
     while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
+    // Analog
+    (void)Analog_Init(CPU_BUS_CLK_HZ);
+    // Generate the global analog semaphores
+    for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+      AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
+    // Initialise the low power timer to tick every 10 ms
+    LPTMRInit(10);
     OS_ThreadDelete(TOWER_INIT_PRI);
   }
 }
