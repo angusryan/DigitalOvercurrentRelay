@@ -278,8 +278,9 @@ void TowerInitThread(void* pData)
  */
 void PacketHandlerThread(void* pData)
 {
-  StartupPackets(); /*!< Sends Packets from Device to PC on Startup. */
+
   OS_SemaphoreWait(PacketHandlerSemaphore, 0); //Wait until triggered by Semaphore Signal
+  StartupPackets(); /*!< Sends Packets from Device to PC on Startup. */
   for(;;)
   {
     if (Packet_Get())
