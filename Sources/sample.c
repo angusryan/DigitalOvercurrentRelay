@@ -33,7 +33,8 @@ void Trip(float iRMS) {
 }
 
 /*A true RMS meter works by taking the square of the instantaneous value of the input voltage or current,
-  averaging this value over time, and then displaying the square root of this average.*/
+*  averaging this value over time, and then displaying the square root of this average.
+*  https://www.tester.co.uk/blog/electrical/multimeter-jargon-busters-true-rms*/
 
 //One PIT firing every 16 times per 50Hz Cycle to store current instaneous voltage at that moment
 //Second PIT firing for the trip after dedicated time period
