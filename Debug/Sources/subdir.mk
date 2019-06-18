@@ -11,7 +11,8 @@ C_SRCS += \
 ../Sources/PIT.c \
 ../Sources/UART.c \
 ../Sources/main.c \
-../Sources/packet.c 
+../Sources/packet.c \
+../Sources/sample.c 
 
 OBJS += \
 ./Sources/FIFO.o \
@@ -21,7 +22,8 @@ OBJS += \
 ./Sources/PIT.o \
 ./Sources/UART.o \
 ./Sources/main.o \
-./Sources/packet.o 
+./Sources/packet.o \
+./Sources/sample.o 
 
 C_DEPS += \
 ./Sources/FIFO.d \
@@ -31,14 +33,15 @@ C_DEPS += \
 ./Sources/PIT.d \
 ./Sources/UART.d \
 ./Sources/main.d \
-./Sources/packet.d 
+./Sources/packet.d \
+./Sources/sample.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes
 Sources/%.o: ../Sources/%.c
 	@echo 'Building file: $<'
 	@echo 'Invoking: Cross ARM C Compiler'
-	arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -O0 -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections  -g3 -I"C:\Users\12947533\Documents\DigitalOvercurrentRelay\Library" -I"C:/Users/12947533/Documents/DigitalOvercurrentRelay/Static_Code/IO_Map" -I"C:/Users/12947533/Documents/DigitalOvercurrentRelay/Sources" -I"C:/Users/12947533/Documents/DigitalOvercurrentRelay/Generated_Code" -std=c99 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" -c -o "$@" "$<"
+	arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -O0 -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections  -g3 -I"/home/angus/Dev/UniversityDevelopment/EmbeddedSoftware/DigitalOvercurrentRelay/Library" -I"/home/angus/Dev/UniversityDevelopment/EmbeddedSoftware/DigitalOvercurrentRelay/Static_Code/IO_Map" -I"/home/angus/Dev/UniversityDevelopment/EmbeddedSoftware/DigitalOvercurrentRelay/Sources" -I"/home/angus/Dev/UniversityDevelopment/EmbeddedSoftware/DigitalOvercurrentRelay/Generated_Code" -std=c99 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" -c -o "$@" "$<"
 	@echo 'Finished building: $<'
 	@echo ' '
 
