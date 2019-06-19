@@ -27,7 +27,6 @@ FTM0_Callback       0x1c              ./Sources/FTM.o
 FTM0_Arguments      0x1c              ./Sources/FTM.o
 PITSemaphore        0x4               ./Sources/PIT.o
 UARTTXSemaphore     0x4               ./Sources/UART.o
-xbffdbfdbf          0x4               ./Sources/sample.o
 Analog_Inputs       0xa0              /home/angus/Dev/UniversityDevelopment/EmbeddedSoftware/DigitalOvercurrentRelay/Library/libAnalog.a(analog.o)
 UARTRXSemaphore     0x4               ./Sources/UART.o
 SR_reg              0x1               ./Generated_Code/Cpu.o
@@ -276,22 +275,38 @@ Discarded input sections
  .group         0x00000000        0x8 ./Sources/sample.o
  .group         0x00000000        0x8 ./Sources/sample.o
  .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
+ .group         0x00000000        0x8 ./Sources/sample.o
  .text          0x00000000        0x0 ./Sources/sample.o
  .data          0x00000000        0x0 ./Sources/sample.o
  .bss           0x00000000        0x0 ./Sources/sample.o
+ .data.Inverse  0x00000000        0x8 ./Sources/sample.o
+ .data.Very_Inverse
+                0x00000000        0x8 ./Sources/sample.o
+ .data.Extremely_Inverse
+                0x00000000        0x8 ./Sources/sample.o
+ .data.TripTime
+                0x00000000     0x2c82 ./Sources/sample.o
  .text.Sample_Init
                 0x00000000       0x10 ./Sources/sample.o
  .text.Sliding_Voltage
-                0x00000000       0x10 ./Sources/sample.o
+                0x00000000       0x34 ./Sources/sample.o
  .text.Current_RMS
-                0x00000000       0x18 ./Sources/sample.o
+                0x00000000       0x20 ./Sources/sample.o
  .text.Trip     0x00000000       0x18 ./Sources/sample.o
- .debug_info    0x00000000      0x10e ./Sources/sample.o
- .debug_abbrev  0x00000000       0x95 ./Sources/sample.o
+ .debug_info    0x00000000      0x1c9 ./Sources/sample.o
+ .debug_abbrev  0x00000000      0x10c ./Sources/sample.o
  .debug_aranges
                 0x00000000       0x38 ./Sources/sample.o
  .debug_ranges  0x00000000       0x28 ./Sources/sample.o
- .debug_macro   0x00000000       0xd0 ./Sources/sample.o
+ .debug_macro   0x00000000      0x155 ./Sources/sample.o
  .debug_macro   0x00000000      0x874 ./Sources/sample.o
  .debug_macro   0x00000000       0x22 ./Sources/sample.o
  .debug_macro   0x00000000       0x4c ./Sources/sample.o
@@ -306,13 +321,21 @@ Discarded input sections
  .debug_macro   0x00000000      0x187 ./Sources/sample.o
  .debug_macro   0x00000000      0x330 ./Sources/sample.o
  .debug_macro   0x00000000       0xde ./Sources/sample.o
- .debug_line    0x00000000      0x1e2 ./Sources/sample.o
- .debug_str     0x00000000     0x5718 ./Sources/sample.o
+ .debug_macro   0x00000000       0xfd ./Sources/sample.o
+ .debug_macro   0x00000000       0x22 ./Sources/sample.o
+ .debug_macro   0x00000000      0x1df ./Sources/sample.o
+ .debug_macro   0x00000000     0x1810 ./Sources/sample.o
+ .debug_macro   0x00000000      0x14e ./Sources/sample.o
+ .debug_macro   0x00000000       0x64 ./Sources/sample.o
+ .debug_macro   0x00000000    0x174c1 ./Sources/sample.o
+ .debug_macro   0x00000000       0x9a ./Sources/sample.o
+ .debug_macro   0x00000000       0x22 ./Sources/sample.o
+ .debug_line    0x00000000      0x359 ./Sources/sample.o
+ .debug_str     0x00000000    0x8d95b ./Sources/sample.o
  .comment       0x00000000       0x6f ./Sources/sample.o
- .debug_frame   0x00000000       0xa0 ./Sources/sample.o
+ .debug_frame   0x00000000       0xa8 ./Sources/sample.o
  .ARM.attributes
                 0x00000000       0x39 ./Sources/sample.o
- COMMON         0x00000000        0x4 ./Sources/sample.o
  .group         0x00000000        0x8 ./Project_Settings/Startup_Code/startup.o
  .group         0x00000000        0x8 ./Project_Settings/Startup_Code/startup.o
  .group         0x00000000        0x8 ./Project_Settings/Startup_Code/startup.o

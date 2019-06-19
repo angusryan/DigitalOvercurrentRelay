@@ -30,10 +30,10 @@ typedef struct {
 
 }TSample;
 
-void Sample_Init(void);
+bool Sample_Init(void);
 
-void Sliding_Voltage();
+float Sliding_Voltage();
 
-void Current_RMS(float vRMS);
+float Current_RMS(float vRMS);
 
 void Trip(float iRMS);
