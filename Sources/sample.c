@@ -4,7 +4,7 @@
 #include "types.h"
 #include "sample.h"
 
-//struct TSample sample[3];
+
 
 uint16_t TripTime[3][1899] = { //TripTime[sample->Characteristic][iRMSposition]
   { //INVERSE
@@ -24,7 +24,7 @@ bool Sample_Init(void) {
   return true;
 }
 
-float Sliding_Voltage() {
+float Sliding_Voltage(const TSample* const sample) {
   uint8_t i = 0;
   for(i=0; i<16;i++ ) {
     //sample[0].vRMS = 0.00;
@@ -42,7 +42,7 @@ float Current_RMS(float vRMS) {
   return 0.00;
 }
 
-void Trip(float iRMS) {
+void TripTimeCalculation(float iRMS) {
   //Time to Trip = k/(iRMS^a-1)
   //if iRMS < 1.03 -> time = infinite
   //PIT to output 5v after a certain amount of time

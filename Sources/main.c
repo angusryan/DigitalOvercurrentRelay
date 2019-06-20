@@ -26,19 +26,17 @@
  */
 /* MODULE main */
 
-// CPU module - contains low level hardware initialization routines
-#include "Cpu.h"
 
-// Simple OS
+#include "Cpu.h" // CPU module - contains low level hardware initialization routines
 #include "OS.h"
-
-// Analog functions
 #include "analog.h"
-
-// Modules
 #include "UART.h"
 #include "packet.h"
 #include "Flash.h"
+#include "PIT.h"
+#include "LEDs.h"
+#include "sample.h"
+
 // Global variables and macro definitions
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint32_t MODULECLK = CPU_BUS_CLK_HZ; /*!< Clock Speed referenced from Cpu.H */
@@ -47,6 +45,8 @@ const uint32_t PIT_Period = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
 const uint8_t PACKET_ACK_MASK = 0x80; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
+#define THREAD_STACK_SIZE 100 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
+#define NB_ANALOG_CHANNELS 3
 
 typedef enum
 {
@@ -55,6 +55,8 @@ typedef enum
   UART_TX_PRI,
   ANALOG_CHANNEL_1,
   ANALOG_CHANNEL_2,
+  ANALOG_CHANNEL_3,
+  PIT_PRI,
   PACKET_HANDLER_PRI
 }TPRIORITIES;
 
@@ -66,20 +68,15 @@ bool VersionPackets(void);
 bool TowerNumberPackets(void);
 bool TowerModePackets(void);
 void ThreadsInit(void);
-
-// ----------------------------------------
-// Thread set up
-// ----------------------------------------
-// Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
-#define THREAD_STACK_SIZE 100
-#define NB_ANALOG_CHANNELS 2
+void PITCallback(void);
+void LPTMRInit(const uint16_t count);
 
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
 
 // Thread stacks
 static uint32_t AnalogThreadStacks[NB_ANALOG_CHANNELS][THREAD_STACK_SIZE] __attribute__ ((aligned(0x08)));
 OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
-//OS_THREAD_STACK(PITStack, THREAD_STACK_SIZE);
+OS_THREAD_STACK(PITStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(UARTRXStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(UARTTXStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
@@ -88,7 +85,7 @@ OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
 // Thread priorities
 // 0 = highest priority
 // ----------------------------------------
-const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4};
+const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 
 /*! @brief Data structure used to pass Analog configuration to a user thread
  *
@@ -98,6 +95,8 @@ typedef struct AnalogThreadData
   OS_ECB* semaphore;
   uint8_t channelNb;
 } TAnalogThreadData;
+
+TSample sample[3];
 
 /*! @brief Analog thread configuration data
  *
@@ -113,6 +112,80 @@ static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
     .channelNb = 1
   }
 };
+
+/*lint -save  -e970 Disable MISRA rule (6.3) checking. */
+int main(void)
+/*lint -restore Enable MISRA rule (6.3) checking. */
+{
+
+  // Initialise low-level clocks etc using Processor Expert code
+  PE_low_level_init();
+  // Initialize the RTOS
+  OS_Init(CPU_CORE_CLK_HZ, true);
+  // Create module initialisation thread
+  ThreadsInit();
+  PacketHandlerSemaphore = OS_SemaphoreCreate(0);
+  // Start multithreading - never returns!
+  OS_Start();
+}
+
+/*! @brief Initialises modules.
+ *
+ */
+static void TowerInitThread(void* pData)
+{
+  // Analog
+  (void)Analog_Init(CPU_BUS_CLK_HZ);
+
+  // Generate the global analog semaphores
+  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+    AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
+
+  // Initialise the low power timer to tick every 10 ms
+  LPTMRInit(10);
+  /*!<  Allocate var for both Tower Number and Mode, if succcessful, FlashWrite16 them with the right values */
+  Flash_Init();
+  bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
+  bool towerNumberInit = Flash_AllocateVar((volatile void **) &TowerNumber, sizeof(*TowerNumber));
+//  LEDs_Init();
+  if(towerModeInit && towerNumberInit)
+  {
+    if(TowerMode->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
+    {
+      Flash_Write16((volatile uint16_t *) TowerMode, 0x1); /*!< Parsing through the function: typecast volatile uint16_t pointer from uint16union_t pointer, and default towerMode = 1 */
+    }
+    if(TowerNumber->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
+    {
+      Flash_Write16((volatile uint16_t *) TowerNumber, STUDENT_ID); /*Like above, but with towerNumber set to our student ID = 7533*/
+    }
+  }
+  LEDs_Init();
+  PIT_Init(MODULECLK, (void*) &PITCallback, NULL);
+  Packet_Init(BAUDRATE, MODULECLK);
+  while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
+  // We only do this once - therefore delete this thread
+  OS_ThreadDelete(OS_PRIORITY_SELF);
+}
+
+/*! @brief Samples a value on an ADC channel and sends it to the corresponding DAC channel.
+ *
+ */
+void AnalogLoopbackThread(void* pData)
+{
+  // Make the code easier to read by giving a name to the typecast'ed pointer
+  #define analogData ((TAnalogThreadData*)pData)
+
+  for (;;)
+  {
+    int16_t analogInputValue;
+
+    (void)OS_SemaphoreWait(analogData->semaphore, 0);
+    // Get analog sample
+    Analog_Get(analogData->channelNb, &analogInputValue);
+    // Put analog sample
+    Analog_Put(analogData->channelNb, analogInputValue);
+  }
+}
 
 /*! @brief The Packet Handler Thread
  *
@@ -130,6 +203,21 @@ void PacketHandlerThread(void* pData)
     }
   }
 }
+
+void ThreadsInit()
+{
+  while (OS_ThreadCreate(TowerInitThread, NULL, &TowerInitStack[THREAD_STACK_SIZE-1], TOWER_INIT_PRI) != OS_NO_ERROR); //Tower Initiation thread
+  while (OS_ThreadCreate(UARTRXThread, NULL, &UARTRXStack[THREAD_STACK_SIZE-1], UART_RX_PRI) != OS_NO_ERROR); //UARTRX Thread
+  while (OS_ThreadCreate(UARTTXThread, NULL, &UARTTXStack[THREAD_STACK_SIZE-1], UART_TX_PRI) != OS_NO_ERROR); //UARTTX Thread
+  // Create threads for 2 analog loopback channels
+  for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
+  {
+    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
+  }
+  while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
+}
+
+
 
 void LPTMRInit(const uint16_t count)
 {
@@ -178,92 +266,6 @@ void __attribute__ ((interrupt)) LPTimer_ISR(void)
     (void)OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore);
 }
 
-/*! @brief Initialises modules.
- *
- */
-static void TowerInitThread(void* pData)
-{
-  // Analog
-  (void)Analog_Init(CPU_BUS_CLK_HZ);
-
-  // Generate the global analog semaphores
-  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-    AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
-
-  // Initialise the low power timer to tick every 10 ms
-  LPTMRInit(10);
-  /*!<  Allocate var for both Tower Number and Mode, if succcessful, FlashWrite16 them with the right values */
-  Flash_Init();
-  bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
-  bool towerNumberInit = Flash_AllocateVar((volatile void **) &TowerNumber, sizeof(*TowerNumber));
-//  LEDs_Init();
-  if(towerModeInit && towerNumberInit)
-  {
-    if(TowerMode->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
-    {
-      Flash_Write16((volatile uint16_t *) TowerMode, 0x1); /*!< Parsing through the function: typecast volatile uint16_t pointer from uint16union_t pointer, and default towerMode = 1 */
-    }
-    if(TowerNumber->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
-    {
-      Flash_Write16((volatile uint16_t *) TowerNumber, STUDENT_ID); /*Like above, but with towerNumber set to our student ID = 7533*/
-    }
-  }
-  Packet_Init(BAUDRATE, MODULECLK);
-  while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
-  // We only do this once - therefore delete this thread
-  OS_ThreadDelete(OS_PRIORITY_SELF);
-}
-
-/*! @brief Samples a value on an ADC channel and sends it to the corresponding DAC channel.
- *
- */
-void AnalogLoopbackThread(void* pData)
-{
-  // Make the code easier to read by giving a name to the typecast'ed pointer
-  #define analogData ((TAnalogThreadData*)pData)
-
-  for (;;)
-  {
-    int16_t analogInputValue;
-
-    (void)OS_SemaphoreWait(analogData->semaphore, 0);
-    // Get analog sample
-    Analog_Get(analogData->channelNb, &analogInputValue);
-    // Put analog sample
-    Analog_Put(analogData->channelNb, analogInputValue);
-
-  }
-}
-
-/*lint -save  -e970 Disable MISRA rule (6.3) checking. */
-int main(void)
-/*lint -restore Enable MISRA rule (6.3) checking. */
-{
-
-  // Initialise low-level clocks etc using Processor Expert code
-  PE_low_level_init();
-  // Initialize the RTOS
-  OS_Init(CPU_CORE_CLK_HZ, true);
-  // Create module initialisation thread
-  ThreadsInit();
-  PacketHandlerSemaphore = OS_SemaphoreCreate(0);
-  // Start multithreading - never returns!
-  OS_Start();
-}
-
-void ThreadsInit()
-{
-  while (OS_ThreadCreate(TowerInitThread, NULL, &TowerInitStack[THREAD_STACK_SIZE-1], TOWER_INIT_PRI) != OS_NO_ERROR); //Tower Initiation thread
-  while (OS_ThreadCreate(UARTRXThread, NULL, &UARTRXStack[THREAD_STACK_SIZE-1], UART_RX_PRI) != OS_NO_ERROR); //UARTRX Thread
-  while (OS_ThreadCreate(UARTTXThread, NULL, &UARTTXStack[THREAD_STACK_SIZE-1], UART_TX_PRI) != OS_NO_ERROR); //UARTTX Thread
-  // Create threads for 2 analog loopback channels
-  for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
-  {
-    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
-  }
-  while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
-}
-
 /*! @brief Process the packet that has been received
  *
  *  @return bool - TRUE if the packet has been handled properly.
@@ -304,9 +306,6 @@ bool PacketHandler(void)
     }
   }
 }
-
-
-
 
 /*! @brief Send the packets needed on startup
 
@@ -371,7 +370,6 @@ bool TowerModePackets(void)
   return false;
 }
 
-
 /*! @brief Send the version packet to the PC
  *
  *  @return bool - TRUE if packet has been sent successfully
@@ -380,6 +378,20 @@ bool TowerModePackets(void)
 bool VersionPackets(void)
 {
   return Packet_Put(TOWER_VERSION_COMMAND,TOWER_VERSION_PARAMETER1,TOWER_VERSION_PARAMETER2, TOWER_VERSION_PARAMETER3);
+}
+
+/*! @brief Triggered during interrupt, turns green LED off
+ *
+ *  @return void
+ *  @note Assumes that PIT_Init called
+ */
+void PITCallback(void)
+{
+  Analog_Get(0, *sample[0].VoltageSamples);
+  //need to workout how to determine what channel?
+  //need to workout when to run sample functions, once you reach 16?
+  //keep a counter tracking 16 samples?
+
 }
 
 

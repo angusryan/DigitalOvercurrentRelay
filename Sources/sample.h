@@ -13,13 +13,8 @@ typedef enum {
   THREE_PHASE
 }TFaultType;
 
-struct Charteristic { float k, a; };
-struct Charteristic Inverse            = {.k = 0.14 , .a = 0.02};
-struct Charteristic Very_Inverse       = {.k = 13.5 , .a = 1};
-struct Charteristic Extremely_Inverse  = {.k = 80   , .a = 2};
-
 typedef struct {
-  float VoltageSamples[16];
+  int16_t * const VoltageSamples[16];
   float vRMS;
   float iRMS;
   uint16union_t frequency;
@@ -27,7 +22,6 @@ typedef struct {
   uint8_t numberOfTrips;
   TIDMTCharacteristic IDMTCharacteristic;
   TFaultType faultType;
-
 }TSample;
 
 bool Sample_Init(void);
@@ -36,4 +30,4 @@ float Sliding_Voltage();
 
 float Current_RMS(float vRMS);
 
-void Trip(float iRMS);
+void TripTimeCalculations(float iRMS);

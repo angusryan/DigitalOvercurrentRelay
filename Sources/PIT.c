@@ -58,7 +58,7 @@ void PIT_Set(const uint32_t period, const bool restart)
   // Read p 1345 of reference manual - equation found in example of PIT init
   /*!< clock period = 1/ PIT_module clk as it has it to be in terms of seconds*/
   uint32_t clockPeriod = 1000000000/PIT_ModuleClk; /*!< 1/25000000=40 in decimal = 0x28 in hexa*/
-  uint32_t triggerLDVAL = (period/clockPeriod) -1;
+  uint32_t triggerLDVAL = (period/clockPeriod) -1; //CHANGE TO 1.25MS
   PIT_LDVAL0 = triggerLDVAL; /*!< Assign the trigger value at register0. Will assign a number to count down from*/
   if(restart) /*!< enabled if restart =true */
   {
@@ -94,7 +94,9 @@ void PITThread(void* pData)
   for(;;)
   {
     OS_SemaphoreWait(PITSemaphore, 0);
-    LEDs_Toggle(LED_GREEN);
+    if (PITCallback) {
+        (*PITCallback)(PITArguments);
+    }
   }
 // handles PIT packets
 }
