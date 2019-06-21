@@ -77,6 +77,7 @@ bool TowerNumberPackets(void);
 bool TowerModePackets(void);
 void ThreadsInit(void);
 void PITCallback(void);
+void ResetDOR(void);
 void LPTMRInit(const uint16_t count);
 
 // Thread stacks
@@ -114,24 +115,24 @@ TSample Sample[NB_ANALOG_CHANNELS] =
 };
 
 
-///*! @brief Analog thread configuration data
-// *
-// */
-//static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
-//{
-//  {
-//    .semaphore = NULL,
-//    .channelNb = 0
-//  },
-//  {
-//    .semaphore = NULL,
-//    .channelNb = 1
-//  },
-//  {
-//    .semaphore = NULL,
-//    .channelNb = 2
-//  }
-//};
+/*! @brief Analog thread configuration data
+ *
+ */
+static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
+{
+  {
+    .semaphore = NULL,
+    .channelNb = 0
+  },
+  {
+    .semaphore = NULL,
+    .channelNb = 1
+  },
+  {
+    .semaphore = NULL,
+    .channelNb = 2
+  }
+};
 
 /*lint -save  -e970 Disable MISRA rule (6.3) checking. */
 int main(void)
@@ -180,6 +181,7 @@ static void TowerInitThread(void* pData)
     }
   }
   LEDs_Init();
+  Sample_Init();
   PIT_Init(MODULECLK, (void*) &PITCallback, NULL);
   Packet_Init(BAUDRATE, MODULECLK);
   while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
@@ -201,16 +203,18 @@ void AnalogLoopbackThread(void* pData)
     int16_t analogInputValue;
     uint16_t i;
     (void)OS_SemaphoreWait(Sample->semaphore, 0);
-    Sample[Sample->channelNb] = Analog_Get(Sample[i].channelNb, &Sample[i].VoltageSamples[i]);
+    Analog_Get(Sample->channelNb, &Sample[i].VoltageSamples[i]);
     Sample[i].VoltageSamplesSqr[i] = Sample[i].VoltageSamples[i]*Sample[i].VoltageSamples[i];
     i++;
-    Sample.vRMS = Voltage_RMS(Sample);
-    Sample.iRMS = Current_RMS(Sample);
-    if(Sample.iRMS > 1.03) {
-
-      Sample.TripTime = iRMS(Sample);
+    Sample->vRMS = Voltage_RMS(Sample);
+    Sample->iRMS = Current_RMS(Sample);
+    if(Sample->iRMS > 1.03) {
+      Sample->triptime = TripTimeCalculation(Sample);
       //do counter math for trip time countdown;
-
+      if(counter == 0) {
+        Analog_Put(Sample[i]->channelNb, analogInputValue); //5v
+        ResetDOR();
+      }
     }
 
     // Get analog sample
@@ -221,6 +225,9 @@ void AnalogLoopbackThread(void* pData)
   }
 }
 
+void ResetDOR() {
+
+}
 /*! @brief The Packet Handler Thread
  *
  *  @note - Loops until interrupted by thread of higher priority

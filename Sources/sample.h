@@ -22,6 +22,7 @@ typedef struct Sample {
   OS_ECB* semaphore;
   float vRMS;
   float iRMS;
+  float triptime;
   uint16union_t frequency;
   TIDMTCharacteristic IDMTCharacteristic;
   TFaultType faultType;
@@ -33,4 +34,4 @@ float Voltage_RMS(const TSample* const sample);
 
 float Current_RMS(const TSample* const sample);
 
-void TripTimeCalculation(float iRMS);
+float TripTimeCalculation(const TSample* const sample);
