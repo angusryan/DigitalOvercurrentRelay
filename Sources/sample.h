@@ -1,5 +1,7 @@
 //Perform calculations on samples to determine characteristics
 
+#include "OS.h"
+
 typedef enum
 {
   INVERSE,
@@ -13,21 +15,22 @@ typedef enum {
   THREE_PHASE
 }TFaultType;
 
-typedef struct {
+typedef struct Sample {
   int16_t * const VoltageSamples[16];
+  int16_t * const VoltageSamplesSqr[16];
+  uint8_t channelNb;
+  OS_ECB* semaphore;
   float vRMS;
   float iRMS;
   uint16union_t frequency;
-  uint8_t current;
-  uint8_t numberOfTrips;
   TIDMTCharacteristic IDMTCharacteristic;
   TFaultType faultType;
 }TSample;
 
 bool Sample_Init(void);
 
-float Sliding_Voltage();
+float Voltage_RMS(const TSample* const sample);
 
-float Current_RMS(float vRMS);
+float Current_RMS(const TSample* const sample);
 
-void TripTimeCalculations(float iRMS);
+void TripTimeCalculation(float iRMS);

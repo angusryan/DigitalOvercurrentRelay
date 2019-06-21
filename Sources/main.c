@@ -30,6 +30,7 @@
 #include "Cpu.h" // CPU module - contains low level hardware initialization routines
 #include "OS.h"
 #include "analog.h"
+#include "math.h"
 #include "UART.h"
 #include "packet.h"
 #include "Flash.h"
@@ -38,15 +39,22 @@
 #include "sample.h"
 
 // Global variables and macro definitions
+#define THREAD_STACK_SIZE 100 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
+#define NB_ANALOG_CHANNELS 3
+
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint32_t MODULECLK = CPU_BUS_CLK_HZ; /*!< Clock Speed referenced from Cpu.H */
 const uint16_t STUDENT_ID = 0x22E2; /*!< Student Number: 7533 */
 const uint32_t PIT_Period = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
 const uint8_t PACKET_ACK_MASK = 0x80; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
+const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
+
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
-#define THREAD_STACK_SIZE 100 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
-#define NB_ANALOG_CHANNELS 3
+
+
+
+OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
 
 typedef enum
 {
@@ -71,8 +79,6 @@ void ThreadsInit(void);
 void PITCallback(void);
 void LPTMRInit(const uint16_t count);
 
-OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
-
 // Thread stacks
 static uint32_t AnalogThreadStacks[NB_ANALOG_CHANNELS][THREAD_STACK_SIZE] __attribute__ ((aligned(0x08)));
 OS_THREAD_STACK(TowerInitStack, THREAD_STACK_SIZE);
@@ -81,11 +87,6 @@ OS_THREAD_STACK(UARTRXStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(UARTTXStack, THREAD_STACK_SIZE);
 OS_THREAD_STACK(PacketHandlerStack, THREAD_STACK_SIZE);
 
-// ----------------------------------------
-// Thread priorities
-// 0 = highest priority
-// ----------------------------------------
-const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 
 /*! @brief Data structure used to pass Analog configuration to a user thread
  *
@@ -96,12 +97,7 @@ typedef struct AnalogThreadData
   uint8_t channelNb;
 } TAnalogThreadData;
 
-TSample sample[3];
-
-/*! @brief Analog thread configuration data
- *
- */
-static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
+TSample Sample[NB_ANALOG_CHANNELS] =
 {
   {
     .semaphore = NULL,
@@ -110,8 +106,32 @@ static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
   {
     .semaphore = NULL,
     .channelNb = 1
+  },
+  {
+    .semaphore = NULL,
+    .channelNb = 2
   }
 };
+
+
+///*! @brief Analog thread configuration data
+// *
+// */
+//static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
+//{
+//  {
+//    .semaphore = NULL,
+//    .channelNb = 0
+//  },
+//  {
+//    .semaphore = NULL,
+//    .channelNb = 1
+//  },
+//  {
+//    .semaphore = NULL,
+//    .channelNb = 2
+//  }
+//};
 
 /*lint -save  -e970 Disable MISRA rule (6.3) checking. */
 int main(void)
@@ -139,7 +159,7 @@ static void TowerInitThread(void* pData)
 
   // Generate the global analog semaphores
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-    AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
+    Sample[analogNb].semaphore = OS_SemaphoreCreate(0);
 
   // Initialise the low power timer to tick every 10 ms
   LPTMRInit(10);
@@ -173,17 +193,31 @@ static void TowerInitThread(void* pData)
 void AnalogLoopbackThread(void* pData)
 {
   // Make the code easier to read by giving a name to the typecast'ed pointer
-  #define analogData ((TAnalogThreadData*)pData)
+  //#define analogData ((TAnalogThreadData*)pData)
+  #define sampleData ((TSample*)pData)
 
   for (;;)
   {
     int16_t analogInputValue;
+    uint16_t i;
+    (void)OS_SemaphoreWait(Sample->semaphore, 0);
+    Sample[Sample->channelNb] = Analog_Get(Sample[i].channelNb, &Sample[i].VoltageSamples[i]);
+    Sample[i].VoltageSamplesSqr[i] = Sample[i].VoltageSamples[i]*Sample[i].VoltageSamples[i];
+    i++;
+    Sample.vRMS = Voltage_RMS(Sample);
+    Sample.iRMS = Current_RMS(Sample);
+    if(Sample.iRMS > 1.03) {
 
-    (void)OS_SemaphoreWait(analogData->semaphore, 0);
+      Sample.TripTime = iRMS(Sample);
+      //do counter math for trip time countdown;
+
+    }
+
     // Get analog sample
-    Analog_Get(analogData->channelNb, &analogInputValue);
+   // Analog_Get(analogData->channelNb, &analogInputValue);
+
     // Put analog sample
-    Analog_Put(analogData->channelNb, analogInputValue);
+   // Analog_Put(analogData->channelNb, analogInputValue);
   }
 }
 
@@ -209,15 +243,13 @@ void ThreadsInit()
   while (OS_ThreadCreate(TowerInitThread, NULL, &TowerInitStack[THREAD_STACK_SIZE-1], TOWER_INIT_PRI) != OS_NO_ERROR); //Tower Initiation thread
   while (OS_ThreadCreate(UARTRXThread, NULL, &UARTRXStack[THREAD_STACK_SIZE-1], UART_RX_PRI) != OS_NO_ERROR); //UARTRX Thread
   while (OS_ThreadCreate(UARTTXThread, NULL, &UARTTXStack[THREAD_STACK_SIZE-1], UART_TX_PRI) != OS_NO_ERROR); //UARTTX Thread
-  // Create threads for 2 analog loopback channels
+  // Create threads for 3 analog loopback channels
   for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
   {
-    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
+    while (OS_ThreadCreate(AnalogLoopbackThread, &Sample[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
   }
   while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
 }
-
-
 
 void LPTMRInit(const uint16_t count)
 {
@@ -262,8 +294,8 @@ void __attribute__ ((interrupt)) LPTimer_ISR(void)
   LPTMR0_CSR |= LPTMR_CSR_TCF_MASK;
 
   // Signal the analog channels to take a sample
-  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-    (void)OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore);
+//  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+//    (void)OS_SemaphoreSignal(Sample[analogNb].semaphore);
 }
 
 /*! @brief Process the packet that has been received
@@ -387,13 +419,10 @@ bool VersionPackets(void)
  */
 void PITCallback(void)
 {
-  Analog_Get(0, *sample[0].VoltageSamples);
-  //need to workout how to determine what channel?
-  //need to workout when to run sample functions, once you reach 16?
-  //keep a counter tracking 16 samples?
+  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+    while(OS_SemaphoreSignal(Sample[analogNb].semaphore) != OS_NO_ERROR);
 
 }
-
 
 /*!
  ** @}
