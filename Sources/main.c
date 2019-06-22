@@ -52,6 +52,7 @@ const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
 
+static bool Tripped = False;
 
 
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
@@ -226,7 +227,8 @@ void AnalogLoopbackThread(void* pData)
 }
 
 void ResetDOR() {
-
+  Analog_Put(Sample->channelNb, 0V);
+  Tripped = False;
 }
 /*! @brief The Packet Handler Thread
  *
@@ -331,6 +333,15 @@ bool PacketHandler(void)
       actionSuccess = TowerModePackets();
       break;
 
+    case DOR_INFORMATION_COMMAND:
+      actionSuccess = DORInformationPackets();
+      break;
+
+    case DOR_CURRENT_COMMAND:
+      actionSuccess = DORCurrentPackets();
+      break;
+
+
   }
 
   if(Packet_Command & PACKET_ACK_MASK) /*!< if ACK bit is set, need to send back ACK packet if done successfully and NAK packet with bit7 cleared */
@@ -362,6 +373,13 @@ bool StartupPackets(void)
         return Packet_Put(TOWER_MODE_COMMAND,TOWER_MODE_GET, TowerMode->s.Lo, TowerMode->s.Hi);
       }
     }
+  }
+}
+
+bool DORInformationPackets(void)
+{
+  if(Packet_Parmeter1 == (uint8_t) 0) {
+
   }
 }
 
@@ -428,7 +446,6 @@ void PITCallback(void)
 {
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
     while(OS_SemaphoreSignal(Sample[analogNb].semaphore) != OS_NO_ERROR);
-
 }
 
 /*!

@@ -90,6 +90,21 @@ extern TPacket Packet;
 #define TOWER_VERSION_ACK 0x89
 #define TOWER_NUMBER_ACK 0x8b
 
+/*!< DOR Information Command */
+#define DOR_INFORMATION_COMMAND 0x70
+#define DOR_CHARACTERISTIC_PARAMETER1 0
+#define DOR_FREQUENCY_PARAMETER1 2
+#define DOR_TRIPPED_PARAMETER1 3
+#define DOR_FAULT_PARAMETER1 4
+#define DOR_FAULT_PARAMETER3 0
+
+/*!< DOR Current Command */
+#define DOR_CURRENT_COMMAND 0x71
+#define DOR_PHASEA_PARAMETER1 0
+#define DOR_PHASEB_PARAMETER1 1
+#define DOR_PHASEC_PARAMETER1 2
+
+
 
 /*!< Command to Flash - Program byte */
 #define FLASH_PROGRAM_COMMAND 0x07
@@ -140,6 +155,19 @@ extern TPacket Packet;
 /*!< Get or set the tower mode  from the PC */
 #define TOWER_MODE_SET 2 /*!< when PARAMETER1 is 2 --> SET TOWER MODE */
 #define TOWER_MODE_GET 1 /*!< when PARAMETER1 is 1 --> GET TOWER MODE */
+
+/*!< Speical - DOR Info */
+#define DOR_INFORMATION 0x70
+
+#define DOR_CHARACTERISTIC 0 /*PARAMETER1 is 0 --> IDMT Characteristic*/
+
+#define DOR_CHARACTERISTIC_GET 1 /*PARAMETER2 is 1 --> GET */
+#define DOR_CHARACRERISTIC_SET 2 /*PARAMETER2 is 1 --> SET */
+
+#define DOR_CURRENT_GET 1  /*PARAMETER1 is 1 --> Get DOR Currents */
+#define DOR_FREQUENCY_GET 2  /*PARAMETER1 is 2 --> Get DOR Frequency */
+#define DOR_TRIPPED_GET 3  /*PARAMETER1 is 1 --> Get DOR # of Trips */
+#define DOR_FAULT_GET 4  /*PARAMETER1 is 4 --> Get DOR Fault Type */
 
 /*! @brief Initializes the packets by calling the initialization routines of the supporting software modules.
  *
