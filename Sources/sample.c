@@ -16,10 +16,12 @@ float TripTime[3][1898] = { //TripTime[sample->Characteristic][iRMSposition]
   }
 };
 
-bool Sample_Init(void) {
-  //set LED high?
+#warning TODO: check is -> is correct
+bool Sample_Init(const TChannelsData* const channelsdata) {
+  channelsdata->IDMTCharacteristic = INVERSE;
   return true;
 }
+
 
 float Voltage_RMS(const TSample* const sample) {
   float vRMS;
@@ -38,10 +40,10 @@ float Current_RMS(const TSample* const sample) {
   return tempiRMS;
 }
 
-float TripTimeCalculation(const TSample* const sample) {
+float TripTimeCalculation(const TSample* const sample, const TChannelsData* const channelsdata) {
   uint16_t index;
   index = (((sample->iRMS)*100)-103);
-  return TripTime[sample->IDMTCharacteristic][index];
+  return TripTime[channelsdata->IDMTCharacteristic][index];
   //if iRMS < 1.03 -> time = infinite
   //PIT to output 5v after a certain amount of time
 }

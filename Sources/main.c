@@ -43,15 +43,15 @@
 #define NB_ANALOG_CHANNELS 3
 const float SAMPLETIME = 1.25;
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
-const uint32_t MODULECLK = CPU_BUS_CLK_HZ; /*!< Clock Speed referenced from Cpu.H */
 const uint16_t STUDENT_ID = 0x22E2; /*!< Student Number: 7533 */
-const uint32_t PIT_Period = 1000000000; /*!< 1/1056Hz = 641025640 ns*/
+const uint32_t PIT_Period = 1250000; //1000000000; /*!< 1/1056Hz = 641025640 ns*/
 const uint8_t PACKET_ACK_MASK = 0x80; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
 const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
-static uint16union_t NumberOfTrips;
+
+
 
 static bool Tripped = false;
 static bool Reset = false;
@@ -119,6 +119,7 @@ TSample Sample[NB_ANALOG_CHANNELS] =
   }
 };
 
+TChannelsData ChannelsData;
 
 /*! @brief Analog thread configuration data
  *
@@ -187,8 +188,8 @@ static void TowerInitThread(void* pData)
   }
   LEDs_Init();
   Sample_Init();
-  PIT_Init(MODULECLK, (void*) &PITCallback, NULL);
-  Packet_Init(BAUDRATE, MODULECLK);
+  PIT_Init(CPU_BUS_CLK_HZ, (void*) &PITCallback, NULL);
+  Packet_Init(BAUDRATE, CPU_BUS_CLK_HZ);
   while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
   // We only do this once - therefore delete this thread
   OS_ThreadDelete(OS_PRIORITY_SELF);
@@ -216,8 +217,9 @@ void AnalogLoopbackThread(void* pData)
     Sample->iRMS = Current_RMS(Sample); //Store iRMS in struct, to be used to determine if circuit must be tripped
     if(Sample->iRMS > 1.03)  //Trip circuit if current is above 1.03 amps.
     {
-      Sample->triptime = TripTimeCalculation(Sample); //fetch Trip time, dependant on IDMT Characteristic set
+   //   Sample->triptime = TripTimeCalculation(Sample, ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
       counter = (1000/SAMPLETIME)*Sample->triptime; //set up counter to trip when timer up. In our case 1.25ms /
+      // Analog_Put(Sample[i]->channelNb, analogInputValue); //FOR WHEN THE TIMER IS RUNNING
       Tripped = true;
     }
     if(Tripped | Reset) //Need to count down the timer for 1 second till reset
@@ -226,7 +228,7 @@ void AnalogLoopbackThread(void* pData)
     }
     if(counter == 0 & Tripped)
     {
-      NumberOfTrips++;
+      ChannelsData.NumberOfTrips++;
    // Analog_Put(Sample[i]->channelNb, analogInputValue); //5v
       Tripped = false;
       counter = (1000/SAMPLETIME);
@@ -247,7 +249,7 @@ void AnalogLoopbackThread(void* pData)
 
 void ResetDOR() {
 //  Analog_Put(Sample->channelNb, 0V);
-  Tripped = false;
+
 }
 /*! @brief The Packet Handler Thread
  *
@@ -394,39 +396,50 @@ bool StartupPackets(void)
 }
 
 bool DORCurrentPackets(void) {
-  if (Packet_Parameter1 == (uint8_t) 0) { //Requested IDMT Characteristic
-
+  uint16union_t iRMS;
+  if (Packet_Parameter1 == (uint8_t) 0) { //Phase A
+    iRMS = Sample[0].iRMS;
+    return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS.s.Lo, iRMS.s.Hi);
   }
-  else if (Packet_Parameter1 == (uint8_t) 1) { //Requested currents?
-
+  else if (Packet_Parameter1 == (uint8_t) 1) { //Phase B
+    iRMS = Sample[1].iRMS;
+    return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS.s.Lo, iRMS.s.Hi);
   }
-  else if (Packet_Parameter1 == (uint8_t) 2) { //Requested frequency
-
+  else if (Packet_Parameter1 == (uint8_t) 2) { //Phase C
+    iRMS = Sample[2].iRMS;
+    return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS.s.Lo, iRMS.s.Hi);
   }
 }
 
 bool DORInformationPackets(void)
 {
-  if(Packet_Parameter1 == (uint8_t) 0) { //Requested IDMT Characteristic
-    if(Packet_Parameter2 == (uint8_t) 0) { //IDMT Get
-      return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACTERISTIC_GET, Sample->IDMTCharacteristic);
+  if(Packet_Parameter1 == (uint8_t) 0) //Requested IDMT Characteristic
+  {
+    if(Packet_Parameter2 == (uint8_t) 0) //IDMT Get
+    {
+      return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACTERISTIC_GET, ChannelsData.IDMTCharacteristic);
     }
-    else if(Packet_Parameter2 == (uint8_t) 1) { //IDMT Set
-     Sample->IDMTCharacteristic = Packet_Parameter3;
-     return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACRERISTIC_SET, Sample->IDMTCharacteristic);
+    else if(Packet_Parameter2 == (uint8_t) 1) //IDMT Set
+    {
+      ChannelsData.IDMTCharacteristic = Packet_Parameter3;
+     return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACRERISTIC_SET, ChannelsData.IDMTCharacteristic);
     }
   }
-  else if(Packet_Parameter1 == (uint8_t) 1) { //Requested currents?
+  else if(Packet_Parameter1 == (uint8_t) 1) //Requested currents?
+  {
 
   }
-  else if(Packet_Parameter1 == (uint8_t) 2) { //Requested frequency
-    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FREQUENCY_PARAMETER1, Sample->frequency->s.Lo,  Sample->frequency->s.Hi);
+  else if(Packet_Parameter1 == (uint8_t) 2) //Requested frequency
+  {
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FREQUENCY_PARAMETER1, ChannelsData.frequency.s.Lo,  ChannelsData.frequency.s.Hi); //UNSURE IF . OR ->
   }
-  else if(Packet_Parameter1 == (uint8_t) 3) { //Requested number of times tripped
-    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_TRIPPED_PARAMETER1, NumberOfTrips->s.Lo, NumberOfTrips->s.Hi);
+  else if(Packet_Parameter1 == (uint8_t) 3) //Requested number of times tripped
+  {
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_TRIPPED_PARAMETER1, ChannelsData.NumberOfTrips->s.Lo, ChannelsData.NumberOfTrips->s.Hi);
   }
-  else if(Packet_Parameter1 == (uint8_t) 4) { //Requested fault type
-    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FAULT_PARAMETER1, Sample->faultType, DOR_FAULT_PARAMETER3);
+  else if(Packet_Parameter1 == (uint8_t) 4) //Requested fault type
+  {
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FAULT_PARAMETER1, ChannelsData.faultType, DOR_FAULT_PARAMETER3);
   }
 }
 
@@ -492,8 +505,10 @@ bool VersionPackets(void)
 void PITCallback(void)
 {
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+  {
     while(OS_SemaphoreSignal(Sample[analogNb].semaphore) != OS_NO_ERROR);
-}
+  }
+  }
 
 /*!
  ** @}
