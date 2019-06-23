@@ -26,7 +26,7 @@ float Voltage_RMS(const TSample* const sample) {
   uint8_t i = 0;
   uint16_t data = 0;
   for(i=0; i<16;i++) {
-    data = data + sample->VoltageSamplesSqr[i];
+    data = data + *sample->VoltageSamplesSqr[i];
   }
   vRMS = sqrt((1/16)*(data));
   return vRMS;
@@ -34,13 +34,13 @@ float Voltage_RMS(const TSample* const sample) {
 
 float Current_RMS(const TSample* const sample) {
   float tempiRMS;
-  tempiRMS = Sample->vRMS/0.350;
+  tempiRMS = sample->vRMS/0.350;
   return tempiRMS;
 }
 
 float TripTimeCalculation(const TSample* const sample) {
   uint16_t index;
-  index = (((iRMS)*100)-103);
+  index = (((sample->iRMS)*100)-103);
   return TripTime[sample->IDMTCharacteristic][index];
   //if iRMS < 1.03 -> time = infinite
   //PIT to output 5v after a certain amount of time

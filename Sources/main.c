@@ -41,7 +41,7 @@
 // Global variables and macro definitions
 #define THREAD_STACK_SIZE 100 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
 #define NB_ANALOG_CHANNELS 3
-
+const float SAMPLETIME = 1.25;
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint32_t MODULECLK = CPU_BUS_CLK_HZ; /*!< Clock Speed referenced from Cpu.H */
 const uint16_t STUDENT_ID = 0x22E2; /*!< Student Number: 7533 */
@@ -51,8 +51,10 @@ const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
+static uint16union_t NumberOfTrips;
 
-static bool Tripped = False;
+static bool Tripped = false;
+static bool Reset = false;
 
 
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
@@ -76,6 +78,8 @@ bool StartupPackets(void);
 bool VersionPackets(void);
 bool TowerNumberPackets(void);
 bool TowerModePackets(void);
+bool DORInformationPackets(void);
+bool DORCurrentPackets(void);
 void ThreadsInit(void);
 void PITCallback(void);
 void ResetDOR(void);
@@ -202,22 +206,37 @@ void AnalogLoopbackThread(void* pData)
   for (;;)
   {
     int16_t analogInputValue;
-    uint16_t i;
-    (void)OS_SemaphoreWait(Sample->semaphore, 0);
-    Analog_Get(Sample->channelNb, &Sample[i].VoltageSamples[i]);
-    Sample[i].VoltageSamplesSqr[i] = Sample[i].VoltageSamples[i]*Sample[i].VoltageSamples[i];
-    i++;
-    Sample->vRMS = Voltage_RMS(Sample);
-    Sample->iRMS = Current_RMS(Sample);
-    if(Sample->iRMS > 1.03) {
-      Sample->triptime = TripTimeCalculation(Sample);
-      //do counter math for trip time countdown;
-      if(counter == 0) {
-        Analog_Put(Sample[i]->channelNb, analogInputValue); //5v
-        ResetDOR();
-      }
+    uint16_t counter; //Initialise 16-bit counter variable;
+    uint8_t i; //Initialise 8-bit i variable;
+    (void)OS_SemaphoreWait(Sample->semaphore, 0);//wait until Semaphore signaled by PIT Callback
+   // Analog_Get(Sample->channelNb, &Sample[i].VoltageSamples[i]); //Get a sample, returning raw voltage value, storing in struct
+   // Sample[i].VoltageSamplesSqr[i] = Sample[i].VoltageSamples[i]*Sample[i].VoltageSamples[i]; //store voltage^2 to be used to determine vRMS
+    i++; //increment voltage sample in array
+    Sample->vRMS = Voltage_RMS(Sample); //Store vRMS in struct, to be used to determine iRMS
+    Sample->iRMS = Current_RMS(Sample); //Store iRMS in struct, to be used to determine if circuit must be tripped
+    if(Sample->iRMS > 1.03)  //Trip circuit if current is above 1.03 amps.
+    {
+      Sample->triptime = TripTimeCalculation(Sample); //fetch Trip time, dependant on IDMT Characteristic set
+      counter = (1000/SAMPLETIME)*Sample->triptime; //set up counter to trip when timer up. In our case 1.25ms /
+      Tripped = true;
     }
-
+    if(Tripped | Reset) //Need to count down the timer for 1 second till reset
+    {
+      counter--;
+    }
+    if(counter == 0 & Tripped)
+    {
+      NumberOfTrips++;
+   // Analog_Put(Sample[i]->channelNb, analogInputValue); //5v
+      Tripped = false;
+      counter = (1000/SAMPLETIME);
+      Reset = true;
+    }
+    if(Reset & counter == 0)
+    {
+      ResetDOR();
+      Reset = false;
+    }
     // Get analog sample
    // Analog_Get(analogData->channelNb, &analogInputValue);
 
@@ -227,8 +246,8 @@ void AnalogLoopbackThread(void* pData)
 }
 
 void ResetDOR() {
-  Analog_Put(Sample->channelNb, 0V);
-  Tripped = False;
+//  Analog_Put(Sample->channelNb, 0V);
+  Tripped = false;
 }
 /*! @brief The Packet Handler Thread
  *
@@ -340,8 +359,6 @@ bool PacketHandler(void)
     case DOR_CURRENT_COMMAND:
       actionSuccess = DORCurrentPackets();
       break;
-
-
   }
 
   if(Packet_Command & PACKET_ACK_MASK) /*!< if ACK bit is set, need to send back ACK packet if done successfully and NAK packet with bit7 cleared */
@@ -376,10 +393,40 @@ bool StartupPackets(void)
   }
 }
 
+bool DORCurrentPackets(void) {
+  if (Packet_Parameter1 == (uint8_t) 0) { //Requested IDMT Characteristic
+
+  }
+  else if (Packet_Parameter1 == (uint8_t) 1) { //Requested currents?
+
+  }
+  else if (Packet_Parameter1 == (uint8_t) 2) { //Requested frequency
+
+  }
+}
+
 bool DORInformationPackets(void)
 {
-  if(Packet_Parmeter1 == (uint8_t) 0) {
+  if(Packet_Parameter1 == (uint8_t) 0) { //Requested IDMT Characteristic
+    if(Packet_Parameter2 == (uint8_t) 0) { //IDMT Get
+      return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACTERISTIC_GET, Sample->IDMTCharacteristic);
+    }
+    else if(Packet_Parameter2 == (uint8_t) 1) { //IDMT Set
+     Sample->IDMTCharacteristic = Packet_Parameter3;
+     return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACRERISTIC_SET, Sample->IDMTCharacteristic);
+    }
+  }
+  else if(Packet_Parameter1 == (uint8_t) 1) { //Requested currents?
 
+  }
+  else if(Packet_Parameter1 == (uint8_t) 2) { //Requested frequency
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FREQUENCY_PARAMETER1, Sample->frequency->s.Lo,  Sample->frequency->s.Hi);
+  }
+  else if(Packet_Parameter1 == (uint8_t) 3) { //Requested number of times tripped
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_TRIPPED_PARAMETER1, NumberOfTrips->s.Lo, NumberOfTrips->s.Hi);
+  }
+  else if(Packet_Parameter1 == (uint8_t) 4) { //Requested fault type
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FAULT_PARAMETER1, Sample->faultType, DOR_FAULT_PARAMETER3);
   }
 }
 

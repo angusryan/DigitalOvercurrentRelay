@@ -156,18 +156,18 @@ extern TPacket Packet;
 #define TOWER_MODE_SET 2 /*!< when PARAMETER1 is 2 --> SET TOWER MODE */
 #define TOWER_MODE_GET 1 /*!< when PARAMETER1 is 1 --> GET TOWER MODE */
 
-/*!< Speical - DOR Info */
-#define DOR_INFORMATION 0x70
+///*!< Speical - DOR Info */
+//#define DOR_INFORMATION 0x70
 
-#define DOR_CHARACTERISTIC 0 /*PARAMETER1 is 0 --> IDMT Characteristic*/
+//#define DOR_CHARACTERISTIC 0 /*PARAMETER1 is 0 --> IDMT Characteristic*/
 
 #define DOR_CHARACTERISTIC_GET 1 /*PARAMETER2 is 1 --> GET */
 #define DOR_CHARACRERISTIC_SET 2 /*PARAMETER2 is 1 --> SET */
 
-#define DOR_CURRENT_GET 1  /*PARAMETER1 is 1 --> Get DOR Currents */
-#define DOR_FREQUENCY_GET 2  /*PARAMETER1 is 2 --> Get DOR Frequency */
-#define DOR_TRIPPED_GET 3  /*PARAMETER1 is 1 --> Get DOR # of Trips */
-#define DOR_FAULT_GET 4  /*PARAMETER1 is 4 --> Get DOR Fault Type */
+//#define DOR_CURRENT_GET 1  /*PARAMETER1 is 1 --> Get DOR Currents */
+//#define DOR_FREQUENCY_GET 2  /*PARAMETER1 is 2 --> Get DOR Frequency */
+//#define DOR_TRIPPED_GET 3  /*PARAMETER1 is 1 --> Get DOR # of Trips */
+//#define DOR_FAULT_GET 4  /*PARAMETER1 is 4 --> Get DOR Fault Type */
 
 /*! @brief Initializes the packets by calling the initialization routines of the supporting software modules.
  *
