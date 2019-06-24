@@ -185,19 +185,23 @@ void AnalogLoopbackThread(void* pData)
 {
   // Make the code easier to read by giving a name to the typecast'ed pointer
   #define analogData ((TAnalogThreadData*)pData)
+  float currentiRMS;
+  float remainderTimePercentage;
+  int16_t analogInputValue;
+  int16_t intiRMS;
+  int16_t intcurrentiRMS;
+  uint16_t counter; //Initialize 16-bit counter variable;
   for (;;)
   {
-    OS_DisableInterrupts();
-    float currentiRMS;
-    int16_t analogInputValue;
-    float remainderTimePercentage;
-    uint16_t counter; //Initialize 16-bit counter variable;
     (void)OS_SemaphoreWait(analogData->semaphore, 0);//wait until Semaphore signaled by PIT Callback
+    OS_DisableInterrupts();
     Analog_Get(analogData->channelNb, &analogInputValue); //Get a sample, returning raw voltage value, storing in structure
     Sliding_Voltage(&Sample[analogData->channelNb], RAW_TO_VOLTAGE(analogInputValue));
     Voltage_RMS(&Sample[analogData->channelNb]); //Store vRMS in structure, to be used to determine iRMS
     Current_RMS(&Sample[analogData->channelNb]); //Store iRMS in structure, to be used to determine if circuit must be tripped
-    if((Sample[analogData->channelNb].iRMS > 1.03) && (Sample[analogData->channelNb].iRMS != currentiRMS))  //Trip circuit if current is above 1.03 amps.
+    intiRMS = ((Sample[analogData->channelNb].iRMS)*1000);
+    intcurrentiRMS = (currentiRMS*1000);
+    if((Sample[analogData->channelNb].iRMS > 1.03) && (intiRMS != intcurrentiRMS))  //Trip circuit if current is above 1.03 amps.
     {
       LEDs_On(LED_BLUE);
       currentiRMS = Sample[analogData->channelNb].iRMS;
@@ -224,6 +228,7 @@ void AnalogLoopbackThread(void* pData)
       LEDs_Off(LED_BLUE);
       LEDs_On(LED_GREEN);
       ChannelsData.NumberOfTrips++;
+      Analog_Put(0, 0);
       Analog_Put(1, VOLTAGE_TO_RAW(5)); //5v
       Tripped = false;
       Reset = true;
@@ -240,8 +245,9 @@ void AnalogLoopbackThread(void* pData)
 
 
 void ResetDOR() {
-  Analog_Put(0, 0);
+  Analog_Put(1, 0);
 }
+
 /*! @brief The Packet Handler Thread
  *
  *  @note - Loops until interrupted by thread of higher priority
@@ -264,10 +270,11 @@ void ThreadsInit()
   while (OS_ThreadCreate(TowerInitThread, NULL, &TowerInitStack[THREAD_STACK_SIZE-1], TOWER_INIT_PRI) != OS_NO_ERROR); //Tower Initiation thread
   while (OS_ThreadCreate(UARTRXThread, NULL, &UARTRXStack[THREAD_STACK_SIZE-1], UART_RX_PRI) != OS_NO_ERROR); //UARTRX Thread
   while (OS_ThreadCreate(UARTTXThread, NULL, &UARTTXStack[THREAD_STACK_SIZE-1], UART_TX_PRI) != OS_NO_ERROR); //UARTTX Thread
+  while (OS_ThreadCreate(PITThread, NULL, &PITStack[THREAD_STACK_SIZE-1], PIT_PRI) != OS_NO_ERROR); //PIT Thread
   // Create threads for 3 analog loopback channels
   for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
   {
-    while (OS_ThreadCreate(AnalogLoopbackThread, &Sample[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
+    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
   }
   while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
 }
@@ -364,9 +371,9 @@ bool DORInformationPackets(void)
     }
     if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[0].s.Lo, iRMS[0].s.Hi)) //PHASEA
     {
-      if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[1].s.Lo, iRMS[1].s.Hi)) //PHASEB
+      if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEB_PARAMETER1,iRMS[1].s.Lo, iRMS[1].s.Hi)) //PHASEB
       {
-        return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[2].s.Lo, iRMS[2].s.Hi); //PHASEC
+        return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEC_PARAMETER1,iRMS[2].s.Lo, iRMS[2].s.Hi); //PHASEC
       }
     }
   }
@@ -447,7 +454,7 @@ void PITCallback(void)
 {
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
   {
-    while(OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore) != OS_NO_ERROR);
+    OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore);
   }
 }
 

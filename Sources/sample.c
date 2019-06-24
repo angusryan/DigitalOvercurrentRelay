@@ -41,7 +41,7 @@ bool Sliding_Voltage(TSample* sample, float voltage) {
 bool Voltage_RMS(TSample* sample)
 {
   OS_DisableInterrupts();
-  sample->vRMS = sqrt((1/16)*(sample->TotalVoltageSqr));
+  sample->vRMS = sqrt((1.00/16.00)*(sample->TotalVoltageSqr));
   OS_EnableInterrupts();
   return true;
 }

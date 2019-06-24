@@ -94,7 +94,8 @@ void PITThread(void* pData)
   for(;;)
   {
     OS_SemaphoreWait(PITSemaphore, 0);
-    if (PITCallback) {
+    if (PITCallback)
+    {
         (*PITCallback)(PITArguments);
     }
   }
