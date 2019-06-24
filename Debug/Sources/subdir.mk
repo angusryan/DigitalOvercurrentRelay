@@ -11,7 +11,8 @@ C_SRCS += \
 ../Sources/PIT.c \
 ../Sources/UART.c \
 ../Sources/main.c \
-../Sources/packet.c 
+../Sources/packet.c \
+../Sources/sample.c 
 
 OBJS += \
 ./Sources/FIFO.o \
@@ -21,7 +22,8 @@ OBJS += \
 ./Sources/PIT.o \
 ./Sources/UART.o \
 ./Sources/main.o \
-./Sources/packet.o 
+./Sources/packet.o \
+./Sources/sample.o 
 
 C_DEPS += \
 ./Sources/FIFO.d \
@@ -31,7 +33,8 @@ C_DEPS += \
 ./Sources/PIT.d \
 ./Sources/UART.d \
 ./Sources/main.d \
-./Sources/packet.d 
+./Sources/packet.d \
+./Sources/sample.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes

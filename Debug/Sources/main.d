@@ -8,8 +8,9 @@ Sources/main.o: ../Sources/main.c \
  C:\Users\12947533\Documents\DigitalOvercurrentRelay\Library/OS.h \
  C:\Users\12947533\Documents\DigitalOvercurrentRelay\Library/analog.h \
  C:/Users/12947533/Documents/DigitalOvercurrentRelay/Sources/types.h \
- ../Sources/Flash.h ../Sources/types.h ../Sources/packet.h \
- ../Sources/UART.h ../Sources/LEDs.h ../Sources/PIT.h ../Sources/FTM.h
+ ../Sources/UART.h ../Sources/types.h ../Sources/packet.h \
+ ../Sources/Flash.h ../Sources/PIT.h ../Sources/LEDs.h \
+ ../Sources/sample.h
 
 C:/Users/12947533/Documents/DigitalOvercurrentRelay/Generated_Code/Cpu.h:
 
@@ -29,16 +30,16 @@ C:\Users\12947533\Documents\DigitalOvercurrentRelay\Library/analog.h:
 
 C:/Users/12947533/Documents/DigitalOvercurrentRelay/Sources/types.h:
 
-../Sources/Flash.h:
+../Sources/UART.h:
 
 ../Sources/types.h:
 
 ../Sources/packet.h:
 
-../Sources/UART.h:
-
-../Sources/LEDs.h:
+../Sources/Flash.h:
 
 ../Sources/PIT.h:
 
-../Sources/FTM.h:
+../Sources/LEDs.h:
+
+../Sources/sample.h:
