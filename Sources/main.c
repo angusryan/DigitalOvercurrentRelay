@@ -143,6 +143,7 @@ int main(void)
  */
 static void TowerInitThread(void* pData)
 {
+  OS_DisableInterrupts();
   // Analog
   (void)Analog_Init(CPU_BUS_CLK_HZ);
 
@@ -154,7 +155,7 @@ static void TowerInitThread(void* pData)
   Flash_Init();
   bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
   bool towerNumberInit = Flash_AllocateVar((volatile void **) &TowerNumber, sizeof(*TowerNumber));
-//  LEDs_Init();
+
   if(towerModeInit && towerNumberInit)
   {
     if(TowerMode->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
@@ -171,6 +172,7 @@ static void TowerInitThread(void* pData)
   PIT_Init(CPU_BUS_CLK_HZ, (void*) &PITCallback, NULL);
   PIT_Set(PIT_Period, true);
   Packet_Init(BAUDRATE, CPU_BUS_CLK_HZ);
+  OS_EnableInterrupts();
   while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
   // We only do this once - therefore delete this thread
   OS_ThreadDelete(OS_PRIORITY_SELF);
@@ -185,6 +187,7 @@ void AnalogLoopbackThread(void* pData)
   #define analogData ((TAnalogThreadData*)pData)
   for (;;)
   {
+    OS_DisableInterrupts();
     float currentiRMS;
     int16_t analogInputValue;
     float remainderTimePercentage;
@@ -196,6 +199,7 @@ void AnalogLoopbackThread(void* pData)
     Current_RMS(&Sample[analogData->channelNb]); //Store iRMS in structure, to be used to determine if circuit must be tripped
     if((Sample[analogData->channelNb].iRMS > 1.03) && (Sample[analogData->channelNb].iRMS != currentiRMS))  //Trip circuit if current is above 1.03 amps.
     {
+      LEDs_On(LED_BLUE);
       currentiRMS = Sample[analogData->channelNb].iRMS;
       if (counter > 0)
       {
@@ -217,6 +221,8 @@ void AnalogLoopbackThread(void* pData)
     }
     if(counter == 0 && Tripped) //TRIP: Set channel 1 to 5V as trip time completed
     {
+      LEDs_Off(LED_BLUE);
+      LEDs_On(LED_GREEN);
       ChannelsData.NumberOfTrips++;
       Analog_Put(1, VOLTAGE_TO_RAW(5)); //5v
       Tripped = false;
@@ -225,9 +231,11 @@ void AnalogLoopbackThread(void* pData)
     if(Reset && counter == 0 && (Sample[analogData->channelNb].iRMS < 1.03))
     {
       ResetDOR();
+      LEDs_Off(LED_GREEN);
       Reset = false;
     }
   }
+  OS_EnableInterrupts();
 }
 
 
@@ -441,7 +449,7 @@ void PITCallback(void)
   {
     while(OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore) != OS_NO_ERROR);
   }
-  }
+}
 
 /*!
  ** @}

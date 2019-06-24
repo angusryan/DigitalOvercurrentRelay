@@ -24,6 +24,7 @@ bool Sample_Init(TChannelsData* channelsdata) {
 }
 
 bool Sliding_Voltage(TSample* sample, float voltage) {
+  OS_DisableInterrupts();
   float temp;
 
   sample->TotalVoltageSqr += voltage*voltage;
@@ -33,26 +34,33 @@ bool Sliding_Voltage(TSample* sample, float voltage) {
     sample->VoltageSamplesSqr[i-1] = sample->VoltageSamplesSqr[i];
   }
   sample->VoltageSamplesSqr[15] = voltage*voltage; //store voltage^2 to be used to determine vRMS
+  OS_EnableInterrupts();
   return true;
 }
 
 bool Voltage_RMS(TSample* sample)
 {
+  OS_DisableInterrupts();
   sample->vRMS = sqrt((1/16)*(sample->TotalVoltageSqr));
+  OS_EnableInterrupts();
   return true;
 }
 
 bool Current_RMS(TSample* sample)
 {
+  OS_DisableInterrupts();
   sample->iRMS = sample->vRMS/0.350;
+  OS_EnableInterrupts();
   return true;
 }
 
 bool TripTimeCalculation(TSample* sample, TChannelsData* channelsdata)
 {
+  OS_DisableInterrupts();
   uint16_t index;
   index = (((sample->iRMS)*100)-103);
   sample->triptime = TripTime[channelsdata->IDMTCharacteristic][index];
+  OS_EnableInterrupts();
   return true;
   //if iRMS < 1.03 -> time = infinite
   //PIT to output 5v after a certain amount of time
