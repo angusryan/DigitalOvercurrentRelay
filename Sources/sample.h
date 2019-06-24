@@ -23,19 +23,26 @@ typedef struct ChannelsData {
 }TChannelsData;
 
 typedef struct Sample {
-  int16_t * const VoltageSamples[16];
-  int16_t * const VoltageSamplesSqr[16];
-  uint8_t channelNb;
-  OS_ECB* semaphore;
+  float VoltageSamples[16];
+  float VoltageSamplesSqr[16];
+  float TotalVoltageSqr;
   float vRMS;
   float iRMS;
   float triptime;
 }TSample;
 
-bool Sample_Init(void);
+#define ADC_RATE 3276.7
+#define RAW_TO_VOLTAGE(X) (float) X / (float) ADC_RATE
+#define VOLTAGE_TO_RAW(X) (int16_t) (float) X * (float) ADC_RATE
 
-float Voltage_RMS(const TSample* const sample);
+bool Sample_Init(TChannelsData* channelsdata);
 
-float Current_RMS(const TSample* const sample);
+bool Sliding_Voltage(TSample* sample, float voltage);
 
-float TripTimeCalculation(const TSample* const sample, const TChannelsData* const channelsdata);
+bool Voltage_RMS(TSample* sample);
+
+bool Current_RMS(TSample* sample);
+
+bool TripTimeCalculation(TSample* sample, TChannelsData* channelsdata);
+
+

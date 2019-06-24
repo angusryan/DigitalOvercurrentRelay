@@ -51,11 +51,8 @@ const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
 
-
-
 static bool Tripped = false;
 static bool Reset = false;
-
 
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
 
@@ -79,7 +76,6 @@ bool VersionPackets(void);
 bool TowerNumberPackets(void);
 bool TowerModePackets(void);
 bool DORInformationPackets(void);
-bool DORCurrentPackets(void);
 void ThreadsInit(void);
 void PITCallback(void);
 void ResetDOR(void);
@@ -103,23 +99,9 @@ typedef struct AnalogThreadData
   uint8_t channelNb;
 } TAnalogThreadData;
 
-TSample Sample[NB_ANALOG_CHANNELS] =
-{
-  {
-    .semaphore = NULL,
-    .channelNb = 0
-  },
-  {
-    .semaphore = NULL,
-    .channelNb = 1
-  },
-  {
-    .semaphore = NULL,
-    .channelNb = 2
-  }
-};
-
+TSample Sample[NB_ANALOG_CHANNELS];
 TChannelsData ChannelsData;
+
 
 /*! @brief Analog thread configuration data
  *
@@ -166,10 +148,8 @@ static void TowerInitThread(void* pData)
 
   // Generate the global analog semaphores
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-    Sample[analogNb].semaphore = OS_SemaphoreCreate(0);
+    AnalogThreadData[analogNb].semaphore = OS_SemaphoreCreate(0);
 
-  // Initialise the low power timer to tick every 10 ms
-  LPTMRInit(10);
   /*!<  Allocate var for both Tower Number and Mode, if succcessful, FlashWrite16 them with the right values */
   Flash_Init();
   bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
@@ -187,8 +167,9 @@ static void TowerInitThread(void* pData)
     }
   }
   LEDs_Init();
-  Sample_Init();
+  Sample_Init(&ChannelsData);
   PIT_Init(CPU_BUS_CLK_HZ, (void*) &PITCallback, NULL);
+  PIT_Set(PIT_Period, true);
   Packet_Init(BAUDRATE, CPU_BUS_CLK_HZ);
   while(OS_SemaphoreSignal(PacketHandlerSemaphore) != OS_NO_ERROR);
   // We only do this once - therefore delete this thread
@@ -201,55 +182,57 @@ static void TowerInitThread(void* pData)
 void AnalogLoopbackThread(void* pData)
 {
   // Make the code easier to read by giving a name to the typecast'ed pointer
-  //#define analogData ((TAnalogThreadData*)pData)
-  #define sampleData ((TSample*)pData)
-
+  #define analogData ((TAnalogThreadData*)pData)
   for (;;)
   {
+    float currentiRMS;
     int16_t analogInputValue;
-    uint16_t counter; //Initialise 16-bit counter variable;
-    uint8_t i; //Initialise 8-bit i variable;
-    (void)OS_SemaphoreWait(Sample->semaphore, 0);//wait until Semaphore signaled by PIT Callback
-   // Analog_Get(Sample->channelNb, &Sample[i].VoltageSamples[i]); //Get a sample, returning raw voltage value, storing in struct
-   // Sample[i].VoltageSamplesSqr[i] = Sample[i].VoltageSamples[i]*Sample[i].VoltageSamples[i]; //store voltage^2 to be used to determine vRMS
-    i++; //increment voltage sample in array
-    Sample->vRMS = Voltage_RMS(Sample); //Store vRMS in struct, to be used to determine iRMS
-    Sample->iRMS = Current_RMS(Sample); //Store iRMS in struct, to be used to determine if circuit must be tripped
-    if(Sample->iRMS > 1.03)  //Trip circuit if current is above 1.03 amps.
+    float remainderTimePercentage;
+    uint16_t counter; //Initialize 16-bit counter variable;
+    (void)OS_SemaphoreWait(analogData->semaphore, 0);//wait until Semaphore signaled by PIT Callback
+    Analog_Get(analogData->channelNb, &analogInputValue); //Get a sample, returning raw voltage value, storing in structure
+    Sliding_Voltage(&Sample[analogData->channelNb], RAW_TO_VOLTAGE(analogInputValue));
+    Voltage_RMS(&Sample[analogData->channelNb]); //Store vRMS in structure, to be used to determine iRMS
+    Current_RMS(&Sample[analogData->channelNb]); //Store iRMS in structure, to be used to determine if circuit must be tripped
+    if((Sample[analogData->channelNb].iRMS > 1.03) && (Sample[analogData->channelNb].iRMS != currentiRMS))  //Trip circuit if current is above 1.03 amps.
     {
-   //   Sample->triptime = TripTimeCalculation(Sample, ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
-      counter = (1000/SAMPLETIME)*Sample->triptime; //set up counter to trip when timer up. In our case 1.25ms /
-      // Analog_Put(Sample[i]->channelNb, analogInputValue); //FOR WHEN THE TIMER IS RUNNING
-      Tripped = true;
+      currentiRMS = Sample[analogData->channelNb].iRMS;
+      if (counter > 0)
+      {
+         remainderTimePercentage = 100-((counter/((1000/SAMPLETIME)*(Sample[analogData->channelNb].triptime)))*100);
+         TripTimeCalculation(Sample, &ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
+         counter = ((1000/SAMPLETIME)*Sample[analogData->channelNb].triptime)*(remainderTimePercentage/100);
+      }
+      else
+      {
+        TripTimeCalculation(Sample, &ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
+        counter = (1000/SAMPLETIME)*Sample[analogData->channelNb].triptime; //set up counter to trip when timer up. In our case 1.25ms /
+        Analog_Put(0, VOLTAGE_TO_RAW(5)); //FOR WHEN THE TIMER IS RUNNING
+        Tripped = true;
+      }
     }
-    if(Tripped | Reset) //Need to count down the timer for 1 second till reset
+    if(Tripped || Reset) //Need to count down the counter, decrementing every 1.25m
     {
       counter--;
     }
-    if(counter == 0 & Tripped)
+    if(counter == 0 && Tripped) //TRIP: Set channel 1 to 5V as trip time completed
     {
       ChannelsData.NumberOfTrips++;
-   // Analog_Put(Sample[i]->channelNb, analogInputValue); //5v
+      Analog_Put(1, VOLTAGE_TO_RAW(5)); //5v
       Tripped = false;
-      counter = (1000/SAMPLETIME);
       Reset = true;
     }
-    if(Reset & counter == 0)
+    if(Reset && counter == 0 && (Sample[analogData->channelNb].iRMS < 1.03))
     {
       ResetDOR();
       Reset = false;
     }
-    // Get analog sample
-   // Analog_Get(analogData->channelNb, &analogInputValue);
-
-    // Put analog sample
-   // Analog_Put(analogData->channelNb, analogInputValue);
   }
 }
 
-void ResetDOR() {
-//  Analog_Put(Sample->channelNb, 0V);
 
+void ResetDOR() {
+  Analog_Put(0, 0);
 }
 /*! @brief The Packet Handler Thread
  *
@@ -281,52 +264,6 @@ void ThreadsInit()
   while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
 }
 
-void LPTMRInit(const uint16_t count)
-{
-  // Enable clock gate to LPTMR module
-  SIM_SCGC5 |= SIM_SCGC5_LPTIMER_MASK;
-
-  // Disable the LPTMR while we set up
-  // This also clears the CSR[TCF] bit which indicates a pending interrupt
-  LPTMR0_CSR &= ~LPTMR_CSR_TEN_MASK;
-
-  // Enable LPTMR interrupts
-  LPTMR0_CSR |= LPTMR_CSR_TIE_MASK;
-  // Reset the LPTMR free running counter whenever the 'counter' equals 'compare'
-  LPTMR0_CSR &= ~LPTMR_CSR_TFC_MASK;
-  // Set the LPTMR as a timer rather than a counter
-  LPTMR0_CSR &= ~LPTMR_CSR_TMS_MASK;
-
-  // Bypass the prescaler
-  LPTMR0_PSR |= LPTMR_PSR_PBYP_MASK;
-  // Select the prescaler clock source
-  LPTMR0_PSR = (LPTMR0_PSR & ~LPTMR_PSR_PCS(0x3)) | LPTMR_PSR_PCS(1);
-
-  // Set compare value
-  LPTMR0_CMR = LPTMR_CMR_COMPARE(count);
-
-  // Initialize NVIC
-  // see p. 91 of K70P256M150SF3RM.pdf
-  // Vector 0x65=101, IRQ=85
-  // NVIC non-IPR=2 IPR=21
-  // Clear any pending interrupts on LPTMR
-  NVICICPR2 = NVIC_ICPR_CLRPEND(1 << 21);
-  // Enable interrupts from LPTMR module
-  NVICISER2 = NVIC_ISER_SETENA(1 << 21);
-
-  //Turn on LPTMR and start counting
-  LPTMR0_CSR |= LPTMR_CSR_TEN_MASK;
-}
-
-void __attribute__ ((interrupt)) LPTimer_ISR(void)
-{
-  // Clear interrupt flag
-  LPTMR0_CSR |= LPTMR_CSR_TCF_MASK;
-
-  // Signal the analog channels to take a sample
-//  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
-//    (void)OS_SemaphoreSignal(Sample[analogNb].semaphore);
-}
 
 /*! @brief Process the packet that has been received
  *
@@ -358,9 +295,6 @@ bool PacketHandler(void)
       actionSuccess = DORInformationPackets();
       break;
 
-    case DOR_CURRENT_COMMAND:
-      actionSuccess = DORCurrentPackets();
-      break;
   }
 
   if(Packet_Command & PACKET_ACK_MASK) /*!< if ACK bit is set, need to send back ACK packet if done successfully and NAK packet with bit7 cleared */
@@ -395,21 +329,6 @@ bool StartupPackets(void)
   }
 }
 
-bool DORCurrentPackets(void) {
-  uint16union_t iRMS;
-  if (Packet_Parameter1 == (uint8_t) 0) { //Phase A
-    iRMS = Sample[0].iRMS;
-    return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS.s.Lo, iRMS.s.Hi);
-  }
-  else if (Packet_Parameter1 == (uint8_t) 1) { //Phase B
-    iRMS = Sample[1].iRMS;
-    return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS.s.Lo, iRMS.s.Hi);
-  }
-  else if (Packet_Parameter1 == (uint8_t) 2) { //Phase C
-    iRMS = Sample[2].iRMS;
-    return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS.s.Lo, iRMS.s.Hi);
-  }
-}
 
 bool DORInformationPackets(void)
 {
@@ -427,7 +346,21 @@ bool DORInformationPackets(void)
   }
   else if(Packet_Parameter1 == (uint8_t) 1) //Requested currents?
   {
-
+    int16union_t iRMS[3];
+    for(uint8_t k=0; k<3; k++)
+    {
+      int16_t intvoltage = Sample[k].iRMS;
+      float wholevoltage = (Sample[k].iRMS*100);
+      iRMS[k].s.Lo = ((intvoltage*100)-wholevoltage);
+      iRMS[k].s.Hi = intvoltage;
+    }
+    if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[0].s.Lo, iRMS[0].s.Hi)) //PHASEA
+    {
+      if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[1].s.Lo, iRMS[1].s.Hi)) //PHASEB
+      {
+        return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[2].s.Lo, iRMS[2].s.Hi); //PHASEC
+      }
+    }
   }
   else if(Packet_Parameter1 == (uint8_t) 2) //Requested frequency
   {
@@ -506,7 +439,7 @@ void PITCallback(void)
 {
   for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
   {
-    while(OS_SemaphoreSignal(Sample[analogNb].semaphore) != OS_NO_ERROR);
+    while(OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore) != OS_NO_ERROR);
   }
   }
 

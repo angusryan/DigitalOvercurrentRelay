@@ -16,37 +16,48 @@ float TripTime[3][1898] = { //TripTime[sample->Characteristic][iRMSposition]
   }
 };
 
-#warning TODO: check is -> is correct
-bool Sample_Init(const TChannelsData* const channelsdata) {
+
+
+bool Sample_Init(TChannelsData* channelsdata) {
   channelsdata->IDMTCharacteristic = INVERSE;
   return true;
 }
 
+bool Sliding_Voltage(TSample* sample, float voltage) {
+  float temp;
 
-float Voltage_RMS(const TSample* const sample) {
-  float vRMS;
-  uint8_t i = 0;
-  uint16_t data = 0;
-  for(i=0; i<16;i++) {
-    data = data + *sample->VoltageSamplesSqr[i];
+  sample->TotalVoltageSqr += voltage*voltage;
+  sample->TotalVoltageSqr -= sample->VoltageSamplesSqr[0];
+  for(uint8_t i=1; i<16; i++)
+  {
+    sample->VoltageSamplesSqr[i-1] = sample->VoltageSamplesSqr[i];
   }
-  vRMS = sqrt((1/16)*(data));
-  return vRMS;
+  sample->VoltageSamplesSqr[15] = voltage*voltage; //store voltage^2 to be used to determine vRMS
+  return true;
 }
 
-float Current_RMS(const TSample* const sample) {
-  float tempiRMS;
-  tempiRMS = sample->vRMS/0.350;
-  return tempiRMS;
+bool Voltage_RMS(TSample* sample)
+{
+  sample->vRMS = sqrt((1/16)*(sample->TotalVoltageSqr));
+  return true;
 }
 
-float TripTimeCalculation(const TSample* const sample, const TChannelsData* const channelsdata) {
+bool Current_RMS(TSample* sample)
+{
+  sample->iRMS = sample->vRMS/0.350;
+  return true;
+}
+
+bool TripTimeCalculation(TSample* sample, TChannelsData* channelsdata)
+{
   uint16_t index;
   index = (((sample->iRMS)*100)-103);
-  return TripTime[channelsdata->IDMTCharacteristic][index];
+  sample->triptime = TripTime[channelsdata->IDMTCharacteristic][index];
+  return true;
   //if iRMS < 1.03 -> time = infinite
   //PIT to output 5v after a certain amount of time
 }
+
 
 /*A true RMS meter works by taking the square of the instantaneous value of the input voltage or current,
 *  averaging this value over time, and then displaying the square root of this average.
