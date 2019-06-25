@@ -50,7 +50,8 @@ const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
 static const float SAMPLE_TIME = 1.25; //declared static global const used for the sample time
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
-
+static volatile uint8_t  *IDMTCharacteristicFlash; /*!< declaring static TowerNumber Pointer */
+static volatile uint16union_t *NumberOfTripsFlash; /*!< declaring static TowerMode Pointer */
 
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
 
@@ -148,10 +149,13 @@ static void TowerInitThread(void* pData)
 
   /*!<  Allocate var for both Tower Number and Mode, if succcessful, FlashWrite16 them with the right values */
   Flash_Init();
+  Sample_Init(&ChannelsData);
   bool towerModeInit = Flash_AllocateVar( (volatile void **) &TowerMode, sizeof(*TowerMode));
   bool towerNumberInit = Flash_AllocateVar((volatile void **) &TowerNumber, sizeof(*TowerNumber));
+  bool idmtCharacteristicInit = Flash_AllocateVar( (volatile void **) &IDMTCharacteristicFlash, sizeof(*IDMTCharacteristicFlash));
+  bool numberOfTripsInit = Flash_AllocateVar((volatile void **) &NumberOfTripsFlash, sizeof(*NumberOfTripsFlash));
 
-  if(towerModeInit && towerNumberInit)
+  if(towerModeInit && towerNumberInit && idmtCharacteristicInit && numberOfTripsInit)
   {
     if(TowerMode->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
     {
@@ -161,9 +165,17 @@ static void TowerInitThread(void* pData)
     {
       Flash_Write16((volatile uint16_t *) TowerNumber, STUDENT_ID); /*Like above, but with towerNumber set to our student ID = 7533*/
     }
+    if(*IDMTCharacteristicFlash == 0xff) /* when unprogrammed, value = 0xffff, announces in hint*/
+    {
+      Flash_Write8((volatile uint8_t  *) IDMTCharacteristicFlash, ChannelsData.IDMTCharacteristic); /*Like above, but with towerNumber set to our student ID = 7533*/
+    }
+    if(NumberOfTripsFlash->l == 0xffff) /* when unprogrammed, value = 0xffff, announces in hint*/
+    {
+      Flash_Write16((volatile uint16_t *) NumberOfTripsFlash, 0x0); /*Like above, but with towerNumber set to our student ID = 7533*/
+    }
   }
   LEDs_Init();
-  Sample_Init(&ChannelsData);
+
   PIT_Init(CPU_BUS_CLK_HZ, (void*) &PITCallback, NULL);
   PIT_Set(PIT_Period, true);
   Packet_Init(BAUDRATE, CPU_BUS_CLK_HZ);
@@ -225,6 +237,7 @@ void AnalogLoopbackThread(void* pData)
       LEDs_Off(LED_BLUE); //show no longer timing
       LEDs_On(LED_GREEN); //show the circuit has been tripped
       ChannelsData.numberOfTrips++; //increment trip counter
+      Flash_Write16((volatile uint16_t *) NumberOfTripsFlash, ChannelsData.numberOfTrips->s.Lo);
       Analog_Put(0, 0); //set Channel 1 to 0V via the DAC to show no longer counting down on timer.
       Analog_Put(1, VOLTAGE_TO_RAW(5)); //set Channel 2 to 5V to show circuit has been tripped.
       trippedTimer = false;
@@ -357,6 +370,7 @@ bool DORInformationPackets(void)
     else if (Packet_Parameter2 == (uint8_t) 1) //IDMT Set
     {
       ChannelsData.IDMTCharacteristic = Packet_Parameter3;
+      Flash_Write8((volatile uint8_t *) IDMTCharacteristicFlash, ChannelsData.IDMTCharacteristic);
      return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACRERISTIC_SET, ChannelsData.IDMTCharacteristic);
     }
   }
