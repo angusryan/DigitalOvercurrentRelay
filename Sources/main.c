@@ -182,9 +182,12 @@ void AnalogLoopbackThread(void* pData)
   float currentiRMS;
   float remainderTimePercentage;
   uint16_t counter; //Initialize 16-bit counter variable;
+  uint8_t loopcounter;
+  uint8_t i =1;
   int16_t analogInputValue;
   int16_t intiRMS;
   int16_t intcurrentiRMS;
+  bool firstset = false;
   bool trippedTimer = false;
   bool reset = false;
 
@@ -236,7 +239,30 @@ void AnalogLoopbackThread(void* pData)
       LEDs_Off(LED_GREEN); //show tripped circuit is now back to normal (no longer tripped)
       reset = false;
     }
+    if ((Sample[analogData->channelNb].voltageSamples[i-1] > 0) && (Sample[analogData->channelNb].voltageSamples[i] < 0))
+    {
+      if (firstset)
+      {
+        Sample[analogData->channelNb].frequencysamples[0] = Sample[analogData->channelNb].voltageSamples[i-1];
+        Sample[analogData->channelNb].frequencysamples[1] = Sample[analogData->channelNb].voltageSamples[i];
+        firstset = false;
+      }
+      else {
+        Sample[analogData->channelNb].frequencysamples[2] = Sample[analogData->channelNb].voltageSamples[i-1];
+        Sample[analogData->channelNb].frequencysamples[3] = Sample[analogData->channelNb].voltageSamples[i];
+        Frequency_Calculation(Sample, &ChannelsData, SAMPLE_TIME, loopcounter);
+        loopcounter = 0;
+        firstset = true;
+      }
+    }
+    if (i>15)
+    {
+      i=1;
+    }
+    i++;
+    loopcounter++;
     OS_EnableInterrupts(); //Enable Interrupts again
+
   }
 }
 

@@ -56,7 +56,9 @@ bool Sliding_Voltage(TSample* sample, float voltage) {
   for (uint8_t i=1; i<16; i++) //cycle through all 16 samples
   {
     sample->voltageSamplesSqr[i-1] = sample->voltageSamplesSqr[i]; //shift each posiiton in array by 1, to older data getting closer to 0
+    sample->voltageSamples[i-1] = sample->voltageSamples[i];
   }
+  sample->voltageSamples[15] = voltage;
   sample->voltageSamplesSqr[15] = voltage*voltage; //store voltage^2 to be used to determine vRMS in latest position in array
   OS_EnableInterrupts(); //enable interrupts
   return true;
@@ -86,4 +88,30 @@ bool Trip_Time_Calculation(TSample* sample, TChannelsData* channelsdata)
   sample->triptime = TripTime[channelsdata->IDMTCharacteristic][index]; //retrieve trip time and store in it triptime variable in sturct
   OS_EnableInterrupts(); //enable interrupts
   return true;
+}
+
+bool Frequency_Calculation(TSample* sample, TChannelsData* channelsdata, float currentsampletime, uint8_t numberofsamples) {
+//Calculate when s1 is neg, then s2 is pos. Store.
+//Calculate when s3 is neg, then s4 is pos. Run frequency function.
+//Determine frequency via the time between s1 and s3
+//Frequecy = 1/Time
+//           _
+//          / \                 /
+//         /   \               /
+//        /     \             /
+//    s2 /       \         s4/
+// -----x---------x---------x-------
+//  s1 /           \     s3/
+//    /             \     /
+//   /               \   /
+//  /                 \_/
+
+//float tempfrequency = 1/(numberofsamples*(currentsampletime/1000));
+int16_t inttempfrequency = 1/(numberofsamples*(currentsampletime/1000));
+channelsdata->frequency.s.Lo = 0; //((tempfrequency*100)-inttempfrequency);
+channelsdata->frequency.s.Hi = inttempfrequency;
+return true;
+
+  //Technically I should have an offset as if there is an interrupt triggered between the sampling period of the analog thread, I am not accounting for that time
+  //So the it isn't exactly finely adjusted.
 }

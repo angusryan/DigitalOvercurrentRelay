@@ -29,6 +29,7 @@ typedef struct Sample {
   float vRMS;
   float iRMS;
   float triptime;
+  float frequencysamples[4];
 }TSample;
 
 #define ADC_RATE 3276.7
@@ -62,4 +63,8 @@ bool Current_RMS(TSample* sample);
  */
 bool Trip_Time_Calculation(TSample* sample, TChannelsData* channelsdata);
 
+/*! @brief Frequency calculation
+ * Determine frequency via the Voltage samples
+ */
+bool Frequency_Calculation(TSample* sample, TChannelsData* channelsdata, float currentsampletime, uint8_t numberofsamples);
 
