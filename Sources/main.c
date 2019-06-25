@@ -1,10 +1,10 @@
 /* ###################################################################
  **     Filename    : main.c
- **     Project     : Lab6
+ **     Project     : Digital Overcurrent Relay
  **     Processor   : MK70FN1M0VMJ12
  **     Version     : Driver 01.01
  **     Compiler    : GNU C Compiler
- **     Date/Time   : 2015-07-20, 13:27, # CodeGen: 0
+ **     Date/Time   : 2019-06-25, 13:27, # CodeGen: 0
  **     Abstract    :
  **         Main module.
  **         This module contains user's application code.
@@ -40,19 +40,17 @@
 
 // Global variables and macro definitions
 #define THREAD_STACK_SIZE 100 // Arbitrary thread stack size - big enough for stacking of interrupts and OS use.
-#define NB_ANALOG_CHANNELS 3
-const float SAMPLETIME = 1.25;
+#define NB_ANALOG_CHANNELS 3 //declare number of channels , in this case 3 -> 0, 1, 2
+
 const uint32_t BAUDRATE = 115200; /*!< Baud Rate specified in project */
 const uint16_t STUDENT_ID = 0x22E2; /*!< Student Number: 7533 */
 const uint32_t PIT_Period = 1250000; //1000000000; /*!< 1/1056Hz = 641025640 ns*/
 const uint8_t PACKET_ACK_MASK = 0x80; /*!< Packet Acknowledgment mask, referring to bit 7 of the Packet */
 const uint8_t ANALOG_THREAD_PRIORITIES[NB_ANALOG_CHANNELS] = {3, 4, 5};
-
+static const float SAMPLE_TIME = 1.25; //declared static global const used for the sample time
 static volatile uint16union_t *TowerNumber; /*!< declaring static TowerNumber Pointer */
 static volatile uint16union_t *TowerMode; /*!< declaring static TowerMode Pointer */
 
-static bool Tripped = false;
-static bool Reset = false;
 
 OS_ECB* PacketHandlerSemaphore; //Declare a semaphore, to be signaled.
 
@@ -79,7 +77,6 @@ bool DORInformationPackets(void);
 void ThreadsInit(void);
 void PITCallback(void);
 void ResetDOR(void);
-void LPTMRInit(const uint16_t count);
 
 // Thread stacks
 static uint32_t AnalogThreadStacks[NB_ANALOG_CHANNELS][THREAD_STACK_SIZE] __attribute__ ((aligned(0x08)));
@@ -99,9 +96,8 @@ typedef struct AnalogThreadData
   uint8_t channelNb;
 } TAnalogThreadData;
 
-TSample Sample[NB_ANALOG_CHANNELS];
-TChannelsData ChannelsData;
-
+TSample Sample[NB_ANALOG_CHANNELS]; //Declare global struct array of size 3 (for 3 channels) -> Sample
+TChannelsData ChannelsData; //Declare global struct ChannelsData
 
 /*! @brief Analog thread configuration data
  *
@@ -126,7 +122,6 @@ static TAnalogThreadData AnalogThreadData[NB_ANALOG_CHANNELS] =
 int main(void)
 /*lint -restore Enable MISRA rule (6.3) checking. */
 {
-
   // Initialise low-level clocks etc using Processor Expert code
   PE_low_level_init();
   // Initialize the RTOS
@@ -183,67 +178,71 @@ static void TowerInitThread(void* pData)
  */
 void AnalogLoopbackThread(void* pData)
 {
-  // Make the code easier to read by giving a name to the typecast'ed pointer
-  #define analogData ((TAnalogThreadData*)pData)
+  #define analogData ((TAnalogThreadData*)pData) // Make the code easier to read by giving a name to the typecast'ed pointer
   float currentiRMS;
   float remainderTimePercentage;
+  uint16_t counter; //Initialize 16-bit counter variable;
   int16_t analogInputValue;
   int16_t intiRMS;
   int16_t intcurrentiRMS;
-  uint16_t counter; //Initialize 16-bit counter variable;
+  bool trippedTimer = false;
+  bool reset = false;
+
   for (;;)
   {
     (void)OS_SemaphoreWait(analogData->semaphore, 0);//wait until Semaphore signaled by PIT Callback
-    OS_DisableInterrupts();
+    OS_DisableInterrupts(); //Disable Interrupts
     Analog_Get(analogData->channelNb, &analogInputValue); //Get a sample, returning raw voltage value, storing in structure
-    Sliding_Voltage(&Sample[analogData->channelNb], RAW_TO_VOLTAGE(analogInputValue));
+    Sliding_Voltage(&Sample[analogData->channelNb], RAW_TO_VOLTAGE(analogInputValue)); //Store retreived analogInputValue into my sliding window array.
     Voltage_RMS(&Sample[analogData->channelNb]); //Store vRMS in structure, to be used to determine iRMS
     Current_RMS(&Sample[analogData->channelNb]); //Store iRMS in structure, to be used to determine if circuit must be tripped
-    intiRMS = ((Sample[analogData->channelNb].iRMS)*1000);
-    intcurrentiRMS = (currentiRMS*1000);
-    if((Sample[analogData->channelNb].iRMS > 1.03) && (intiRMS != intcurrentiRMS))  //Trip circuit if current is above 1.03 amps.
+    intiRMS = ((Sample[analogData->channelNb].iRMS)*1000); //turn iRMS into an integer so can discard 4 decimal values as they fluctuate to easily between samples
+    intcurrentiRMS = (currentiRMS*1000); //calculate the integer from originally stored previous iRMS
+    if ((Sample[analogData->channelNb].iRMS >= 1.03) && (intiRMS != intcurrentiRMS))  //Trip circuit if current is above 1.03 amps.
     {
-      LEDs_On(LED_BLUE);
-      currentiRMS = Sample[analogData->channelNb].iRMS;
-      if (counter > 0)
+      LEDs_On(LED_BLUE); //turn on blue LED to represent trip time has been set
+      currentiRMS = Sample[analogData->channelNb].iRMS; //set the iRMS that triggered the trip as the new current iRMS to recheck on next loop.
+      if (counter > 0) //if counter is > 0, trip time has previously been set therefore implement inverse timing
       {
-         remainderTimePercentage = 100-((counter/((1000/SAMPLETIME)*(Sample[analogData->channelNb].triptime)))*100);
-         TripTimeCalculation(Sample, &ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
-         counter = ((1000/SAMPLETIME)*Sample[analogData->channelNb].triptime)*(remainderTimePercentage/100);
+        remainderTimePercentage = 1.00-(counter/((1000/SAMPLE_TIME)*(Sample[analogData->channelNb].triptime))); //1.00-(past time/orignal time) to find percentage completed, then minus to find remaining percentage
+        Trip_Time_Calculation(Sample, &ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
+        counter = ((1000/SAMPLE_TIME)*Sample[analogData->channelNb].triptime)*(remainderTimePercentage); //based on percentage multiplied by new trip time, set the counter to new value
       }
       else
       {
-        TripTimeCalculation(Sample, &ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
-        counter = (1000/SAMPLETIME)*Sample[analogData->channelNb].triptime; //set up counter to trip when timer up. In our case 1.25ms /
-        Analog_Put(0, VOLTAGE_TO_RAW(5)); //FOR WHEN THE TIMER IS RUNNING
-        Tripped = true;
+        Trip_Time_Calculation(Sample, &ChannelsData); //fetch Trip time, dependant on IDMT Characteristic set
+        counter = (1000/SAMPLE_TIME)*Sample[analogData->channelNb].triptime; //set up counter to trip when timer up. In our case 1.25ms /
+        Analog_Put(0, VOLTAGE_TO_RAW(5)); //FOR WHEN THE TIMER IS RUNNING output 5 volts on Channel 1 (via DAC).
+        trippedTimer = true;
       }
     }
-    if(Tripped || Reset) //Need to count down the counter, decrementing every 1.25m
+    if (trippedTimer) //Need to count down the counter, decrementing every 1.25m
     {
-      counter--;
+      counter--; //if timer has been set, count down the counter.
     }
-    if(counter == 0 && Tripped) //TRIP: Set channel 1 to 5V as trip time completed
+    if (counter == 0 && trippedTimer) //TRIP: Set channel 1 to 5V as trip time completed
     {
-      LEDs_Off(LED_BLUE);
-      LEDs_On(LED_GREEN);
-      ChannelsData.NumberOfTrips++;
-      Analog_Put(0, 0);
-      Analog_Put(1, VOLTAGE_TO_RAW(5)); //5v
-      Tripped = false;
-      Reset = true;
+      LEDs_Off(LED_BLUE); //show no longer timing
+      LEDs_On(LED_GREEN); //show the circuit has been tripped
+      ChannelsData.numberOfTrips++; //increment trip counter
+      Analog_Put(0, 0); //set Channel 1 to 0V via the DAC to show no longer counting down on timer.
+      Analog_Put(1, VOLTAGE_TO_RAW(5)); //set Channel 2 to 5V to show circuit has been tripped.
+      trippedTimer = false;
+      reset = true;
     }
-    if(Reset && counter == 0 && (Sample[analogData->channelNb].iRMS < 1.03))
+    if (reset && (Sample[analogData->channelNb].iRMS < 1.03)) //if its time to reset, iRMS is at a save voltage, set to 0.
     {
-      ResetDOR();
-      LEDs_Off(LED_GREEN);
-      Reset = false;
+      ResetDOR(); //run Reset DOR
+      LEDs_Off(LED_GREEN); //show tripped circuit is now back to normal (no longer tripped)
+      reset = false;
     }
+    OS_EnableInterrupts(); //Enable Interrupts again
   }
-  OS_EnableInterrupts();
 }
 
-
+/*! @brief Reset DOR Function
+ * @note Designed to set the trip channel to 0V when circuit no longer tripped
+ */
 void ResetDOR() {
   Analog_Put(1, 0);
 }
@@ -265,6 +264,9 @@ void PacketHandlerThread(void* pData)
   }
 }
 
+/*! @brief Thread Create for RTOS
+ * Creates the threads.
+ */
 void ThreadsInit()
 {
   while (OS_ThreadCreate(TowerInitThread, NULL, &TowerInitStack[THREAD_STACK_SIZE-1], TOWER_INIT_PRI) != OS_NO_ERROR); //Tower Initiation thread
@@ -274,11 +276,10 @@ void ThreadsInit()
   // Create threads for 3 analog loopback channels
   for (uint8_t threadNb = 0; threadNb < NB_ANALOG_CHANNELS; threadNb++)
   {
-    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR);
+    while (OS_ThreadCreate(AnalogLoopbackThread, &AnalogThreadData[threadNb], &AnalogThreadStacks[threadNb][THREAD_STACK_SIZE - 1], ANALOG_THREAD_PRIORITIES[threadNb]) != OS_NO_ERROR); //Create 3 analog threads for the 3 channels
   }
   while (OS_ThreadCreate(PacketHandlerThread, NULL, &PacketHandlerStack[THREAD_STACK_SIZE-1], PACKET_HANDLER_PRI) != OS_NO_ERROR); //Packet Handler Thread
 }
-
 
 /*! @brief Process the packet that has been received
  *
@@ -309,9 +310,7 @@ bool PacketHandler(void)
     case DOR_INFORMATION_COMMAND:
       actionSuccess = DORInformationPackets();
       break;
-
   }
-
   if(Packet_Command & PACKET_ACK_MASK) /*!< if ACK bit is set, need to send back ACK packet if done successfully and NAK packet with bit7 cleared */
   {
     if(actionSuccess)
@@ -344,48 +343,50 @@ bool StartupPackets(void)
   }
 }
 
-
+/*! @brief Sends the packets related to DOR Information
+ * Can send IDMT characteristic, number of faults, currents, frequency
+ */
 bool DORInformationPackets(void)
 {
-  if(Packet_Parameter1 == (uint8_t) 0) //Requested IDMT Characteristic
+  if (Packet_Parameter1 == (uint8_t) 0) //Requested IDMT Characteristic
   {
-    if(Packet_Parameter2 == (uint8_t) 0) //IDMT Get
+    if (Packet_Parameter2 == (uint8_t) 0) //IDMT Get
     {
       return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACTERISTIC_GET, ChannelsData.IDMTCharacteristic);
     }
-    else if(Packet_Parameter2 == (uint8_t) 1) //IDMT Set
+    else if (Packet_Parameter2 == (uint8_t) 1) //IDMT Set
     {
       ChannelsData.IDMTCharacteristic = Packet_Parameter3;
      return Packet_Put(DOR_INFORMATION_COMMAND,DOR_CHARACTERISTIC_PARAMETER1, DOR_CHARACRERISTIC_SET, ChannelsData.IDMTCharacteristic);
     }
   }
-  else if(Packet_Parameter1 == (uint8_t) 1) //Requested currents?
+  else if (Packet_Parameter1 == (uint8_t) 1) //Requested currents
   {
     int16union_t iRMS[3];
-    for(uint8_t k=0; k<3; k++)
+    for (uint8_t k=0; k<3; k++)
     {
       int16_t intvoltage = Sample[k].iRMS;
       float wholevoltage = (Sample[k].iRMS*100);
       iRMS[k].s.Lo = ((intvoltage*100)-wholevoltage);
       iRMS[k].s.Hi = intvoltage;
     }
-    if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[0].s.Lo, iRMS[0].s.Hi)) //PHASEA
+    if (Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEA_PARAMETER1,iRMS[0].s.Lo, iRMS[0].s.Hi)) //PHASEA
     {
-      if(Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEB_PARAMETER1,iRMS[1].s.Lo, iRMS[1].s.Hi)) //PHASEB
+      if (Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEB_PARAMETER1,iRMS[1].s.Lo, iRMS[1].s.Hi)) //PHASEB
       {
         return Packet_Put(DOR_CURRENT_COMMAND,DOR_PHASEC_PARAMETER1,iRMS[2].s.Lo, iRMS[2].s.Hi); //PHASEC
       }
     }
   }
-  else if(Packet_Parameter1 == (uint8_t) 2) //Requested frequency
+  else if (Packet_Parameter1 == (uint8_t) 2) //Requested frequency
   {
     return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FREQUENCY_PARAMETER1, ChannelsData.frequency.s.Lo,  ChannelsData.frequency.s.Hi); //UNSURE IF . OR ->
   }
-  else if(Packet_Parameter1 == (uint8_t) 3) //Requested number of times tripped
+  else if (Packet_Parameter1 == (uint8_t) 3) //Requested number of times tripped
   {
-    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_TRIPPED_PARAMETER1, ChannelsData.NumberOfTrips->s.Lo, ChannelsData.NumberOfTrips->s.Hi);
+    return Packet_Put(DOR_INFORMATION_COMMAND,DOR_TRIPPED_PARAMETER1, ChannelsData.numberOfTrips->s.Lo, ChannelsData.numberOfTrips->s.Hi);
   }
-  else if(Packet_Parameter1 == (uint8_t) 4) //Requested fault type
+  else if (Packet_Parameter1 == (uint8_t) 4) //Requested fault type
   {
     return Packet_Put(DOR_INFORMATION_COMMAND,DOR_FAULT_PARAMETER1, ChannelsData.faultType, DOR_FAULT_PARAMETER3);
   }
@@ -445,16 +446,16 @@ bool VersionPackets(void)
   return Packet_Put(TOWER_VERSION_COMMAND,TOWER_VERSION_PARAMETER1,TOWER_VERSION_PARAMETER2, TOWER_VERSION_PARAMETER3);
 }
 
-/*! @brief Triggered during interrupt, turns green LED off
+/*! @brief Triggered during interrupt, signals the analog thread semaphores for all 3 channels
  *
  *  @return void
  *  @note Assumes that PIT_Init called
  */
 void PITCallback(void)
 {
-  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++)
+  for (uint8_t analogNb = 0; analogNb < NB_ANALOG_CHANNELS; analogNb++) //Cycle through 3 channels (0-2) to signal 3 threads
   {
-    OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore);
+    OS_SemaphoreSignal(AnalogThreadData[analogNb].semaphore); //Signal Semaphore
   }
 }
 

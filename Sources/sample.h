@@ -19,13 +19,13 @@ typedef struct ChannelsData {
   uint16union_t frequency;
   TIDMTCharacteristic IDMTCharacteristic;
   TFaultType faultType;
-  uint16union_t *NumberOfTrips;
+  uint16union_t *numberOfTrips;
 }TChannelsData;
 
 typedef struct Sample {
-  float VoltageSamples[16];
-  float VoltageSamplesSqr[16];
-  float TotalVoltageSqr;
+  float voltageSamples[16];
+  float voltageSamplesSqr[16];
+  float totalVoltageSqr;
   float vRMS;
   float iRMS;
   float triptime;
@@ -35,14 +35,31 @@ typedef struct Sample {
 #define RAW_TO_VOLTAGE(X) (float) X / (float) ADC_RATE
 #define VOLTAGE_TO_RAW(X) (int16_t) (float) X * (float) ADC_RATE
 
+/*! @brief Sample module initiation
+ *
+ */
 bool Sample_Init(TChannelsData* channelsdata);
 
+/*! @brief Sliding Voltage function
+ * @param Pointer to struct Sample, new voltage
+ * @note function squares new voltages and stores them in an array
+ */
 bool Sliding_Voltage(TSample* sample, float voltage);
 
+/*! @brief Voltage RMS function
+ * @param Pointer to struct Sample
+ * Determines voltage via formula
+ */
 bool Voltage_RMS(TSample* sample);
 
+/*! @brief Calculate iRMS
+ * Determines iRMS based on vRMS
+ */
 bool Current_RMS(TSample* sample);
 
-bool TripTimeCalculation(TSample* sample, TChannelsData* channelsdata);
+/*! @brief Trip time calculation
+ * Determine trip time via characteristic and current, look up in TripTime array
+ */
+bool Trip_Time_Calculation(TSample* sample, TChannelsData* channelsdata);
 
 

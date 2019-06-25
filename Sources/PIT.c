@@ -4,8 +4,8 @@
  *
  *  This contains the functions for operating the periodic interrupt timer (PIT).
  *
- *  @author Lucien Tran & Angus Ryan
- *  @date 2019-05-02
+ *  @author Angus Ryan
+ *  @date 2019-06-25
  */
 
 /*!
